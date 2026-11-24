@@ -13,6 +13,7 @@
 @end
 
 @protocol RiftSpaceOperation
+- (instancetype)initWithSpaceID:(uint64_t)space;
 - (instancetype)initWithDisplayIdentifier:(NSString *)display spaceID:(uint64_t)space;
 - (instancetype)initWithWindows:(NSArray *)windows spaceID:(uint64_t)space;
 - (void)performWithWMBridgeDelegate;
@@ -35,6 +36,22 @@ uint64_t rift_native_space_create(const char *display) {
             return [result respondsToSelector:@selector(spaceID)] ? [(id<RiftSpaceResult>)result spaceID] : 0;
         } @catch (NSException *exception) {
             NSLog(@"Rift native Space create: %@", exception);
+            return 0;
+        }
+    }
+}
+
+int rift_native_space_destroy(uint64_t space) {
+    @autoreleasepool {
+        @try {
+            Class cls = operation(@"SLSBridgedSpaceDestroyOperation", @selector(initWithSpaceID:));
+            if (![cls instancesRespondToSelector:@selector(performWithWMBridgeDelegate)]) return 0;
+            id<RiftSpaceOperation> op = [(id<RiftSpaceOperation>)[cls alloc] initWithSpaceID:space];
+            if (!op) return 0;
+            [op performWithWMBridgeDelegate];
+            return 1;
+        } @catch (NSException *exception) {
+            NSLog(@"Rift native Space destroy: %@", exception);
             return 0;
         }
     }

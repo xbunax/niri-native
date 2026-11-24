@@ -288,6 +288,11 @@ enum SpaceCommands {
 
 #[derive(Subcommand)]
 enum WorkspaceCommands {
+    /// List workspaces and their native macOS Space IDs (same as `query workspaces`).
+    List {
+        #[command(flatten)]
+        scope: SpaceScopeArgs,
+    },
     /// Switch to next workspace
     Next { skip_empty: Option<bool> },
     /// Switch to previous workspace
@@ -302,8 +307,14 @@ enum WorkspaceCommands {
         follow: bool,
         window_id: Option<u32>,
     },
-    /// Create a new workspace
+    /// Create a native desktop on the active display.
     Create,
+    /// Destroy an inactive native desktop. macOS may relocate its windows.
+    #[command(visible_alias = "delete")]
+    Destroy {
+        /// Zero-based index, as shown by `query workspaces`.
+        workspace_id: usize,
+    },
     /// Switch to the last workspace
     Last,
     /// Set layout mode for a workspace (or active workspace when omitted)
@@ -587,7 +598,13 @@ fn main() {
     // Send request and handle response.
     match client.send_request(&request) {
         Ok(resp) => match resp {
-            RiftResponse::Success { data } => {
+            RiftResponse::Success { mut data } => {
+                if matches!(request, RiftRequest::CreateWorkspace | RiftRequest::DestroyWorkspace { .. }) {
+                    if let Err(error) = confirm_workspace_mutation(&client, &request, &mut data) {
+                        eprintln!("Error: {error}");
+                        process::exit(1);
+                    }
+                }
                 if let Err(e) = write_json(
                     &data,
                     std::env::var("RIFT_CLI_PRETTY").map(|v| v != "0").unwrap_or(false),
@@ -614,6 +631,42 @@ fn main() {
             process::exit(1);
         }
     }
+}
+
+fn confirm_workspace_mutation(
+    client: &RiftMachClient,
+    request: &RiftRequest,
+    data: &mut Value,
+) -> Result<(), String> {
+    use std::time::{Duration, Instant};
+
+    let id = data.get("space_id").and_then(Value::as_u64)
+        .ok_or("Rift did not return a native Space ID")?;
+    let display_uuid = data.get("display_uuid").and_then(Value::as_str)
+        .ok_or("Rift did not return the target display")?.to_owned();
+    let creating = matches!(request, RiftRequest::CreateWorkspace);
+    let deadline = Instant::now() + Duration::from_secs(4);
+    while Instant::now() < deadline {
+        let response = client.send_request(&RiftRequest::GetDisplays).map_err(|error| error.to_string())?;
+        if let RiftResponse::Success { data: displays } = response {
+            let displays: Vec<rift_protocol::DisplayData> = serde_json::from_value(displays).map_err(|error| error.to_string())?;
+            let has_space = |d: &rift_protocol::DisplayData| d.space == Some(id)
+                || d.active_space_ids.contains(&id) || d.inactive_space_ids.contains(&id);
+            let target = displays.iter().find(|d| d.uuid == display_uuid);
+            let confirmed = if creating {
+                target.is_some_and(has_space)
+            } else {
+                target.is_some_and(|d| d.space.is_some() || !d.inactive_space_ids.is_empty())
+                    && !displays.iter().any(has_space)
+            };
+            if confirmed {
+                data["status"] = Value::String(if creating { "created" } else { "destroyed" }.into());
+                return Ok(());
+            }
+        }
+        std::thread::sleep(Duration::from_millis(50));
+    }
+    Err(format!("macOS did not confirm the change to Space {id}; run `rift-cli query workspaces` before retrying"))
 }
 
 fn build_request(command: Commands) -> Result<RiftRequest, String> {
@@ -700,6 +753,15 @@ fn build_execute_request(execute: ExecuteCommands) -> Result<RiftRequest, String
             reactor::ReactorCommand::BindingMode(mode),
         )),
         ExecuteCommands::Window { window_cmd } => map_window_command(window_cmd)?,
+        ExecuteCommands::Workspace { workspace_cmd: WorkspaceCommands::List { scope } } => {
+            return build_query_request(QueryCommands::Workspaces { scope });
+        }
+        ExecuteCommands::Workspace { workspace_cmd: WorkspaceCommands::Create } => {
+            return Ok(RiftRequest::CreateWorkspace);
+        }
+        ExecuteCommands::Workspace { workspace_cmd: WorkspaceCommands::Destroy { workspace_id } } => {
+            return Ok(RiftRequest::DestroyWorkspace { workspace_id });
+        }
         ExecuteCommands::Workspace { workspace_cmd } => map_workspace_command(workspace_cmd)?,
         ExecuteCommands::Layout { layout_cmd } => map_layout_command(layout_cmd)?,
         ExecuteCommands::Config { config_cmd } => map_config_command(config_cmd)?,
@@ -957,9 +1019,9 @@ fn map_workspace_command(cmd: WorkspaceCommands) -> Result<CliCommand, String> {
                 window_id,
             },
         ))),
-        WorkspaceCommands::Create => Ok(CliCommand::Reactor(reactor::Command::Layout(
-            LC::CreateWorkspace,
-        ))),
+        WorkspaceCommands::List { .. } | WorkspaceCommands::Create | WorkspaceCommands::Destroy { .. } => {
+            unreachable!("workspace inventory operations have their own IPC requests")
+        }
         WorkspaceCommands::Last => Ok(CliCommand::Reactor(reactor::Command::Layout(
             LC::SwitchToLastWorkspace,
         ))),
@@ -1232,6 +1294,18 @@ fn run_mach_subscription(event: String) -> Result<(), String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn native_workspace_cli_routes_inventory_requests() {
+        let request = |args: &[&str]| {
+            build_request(Cli::try_parse_from(std::iter::once("rift-cli").chain(args.iter().copied())).unwrap().command).unwrap()
+        };
+        assert_eq!(request(&["query", "workspaces"]), request(&["execute", "workspace", "list"]));
+        assert_eq!(request(&["execute", "workspace", "list", "--display", "screen"]), RiftRequest::GetWorkspacesForDisplay { display_uuid: "screen".into() });
+        assert_eq!(request(&["execute", "workspace", "create"]), RiftRequest::CreateWorkspace);
+        assert_eq!(request(&["execute", "workspace", "destroy", "2"]), RiftRequest::DestroyWorkspace { workspace_id: 2 });
+        assert_eq!(request(&["execute", "workspace", "delete", "2"]), RiftRequest::DestroyWorkspace { workspace_id: 2 });
+    }
 
     #[test]
     fn binding_mode_query_and_subscription_parse() {

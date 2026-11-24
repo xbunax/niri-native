@@ -103,6 +103,7 @@ impl From<RuntimeWorkspaceData> for protocol::WorkspaceData {
         Self {
             id: value.id,
             index: value.index,
+            space_id: Some(value.space.get()),
             name: value.name,
             layout_mode: value.layout_mode,
             is_active: value.is_active,

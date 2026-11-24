@@ -24,6 +24,7 @@ pub(super) struct NativeWorkspaces {
     moves: Vec<Move>,
     drop_replies: HashMap<WindowId, std::sync::mpsc::SyncSender<bool>>,
     creates: HashMap<SpaceId, (String, Instant)>,
+    destroys: HashMap<SpaceId, (String, Instant)>,
     timer_pending: bool,
 }
 
@@ -244,25 +245,65 @@ impl Reactor {
         .then_some(previous)
     }
 
-    pub(super) fn create_native_workspace(&mut self, space: SpaceId) -> bool {
-        if self.refreshes_blocked() {
+    pub(crate) fn create_native_workspace_for_cli(&mut self) -> Result<(SpaceId, String), String> {
+        let space = self.workspace_command_space().ok_or("No active workspace")?;
+        self.submit_native_create(space)
+    }
+
+    fn create_native_workspace(&mut self, space: SpaceId) -> bool {
+        if let Err(message) = self.submit_native_create(space) {
+            warn!(%message, "Could not create native workspace");
             return false;
         }
-        let Some(display_uuid) =
-            self.native_desktop_screen(space).map(|screen| screen.display_uuid.clone())
-        else {
-            return false;
-        };
-        let Some(id) = native_spaces::create(&display_uuid) else {
-            warn!(%display_uuid, "SkyLight did not return a new desktop");
-            return false;
-        };
-        self.native_workspaces
-            .creates
-            .insert(id, (display_uuid, Instant::now() + CONFIRMATION_TIMEOUT));
+        true
+    }
+
+    fn submit_native_create(&mut self, space: SpaceId) -> Result<(SpaceId, String), String> {
+        if !self.native_workspaces_enabled() || self.refreshes_blocked()
+            || !self.native_workspaces.switches.is_empty()
+        {
+            return Err("Native desktop topology is unavailable or changing; try again".into());
+        }
+        let display_uuid = self.native_desktop_screen(space)
+            .ok_or("Workspace display is unavailable")?.display_uuid.clone();
+        let id = native_spaces::create(&display_uuid)
+            .ok_or("SkyLight did not return a desktop ID; the private API may be unavailable")?;
+        self.native_workspaces.creates.insert(id, (display_uuid.clone(), Instant::now() + CONFIRMATION_TIMEOUT));
         self.request_space_snapshot();
         self.schedule_native_workspace_tick();
-        true
+        Ok((id, display_uuid))
+    }
+
+    pub(crate) fn destroy_native_workspace(&mut self, index: usize) -> Result<(SpaceId, String), String> {
+        if !self.native_workspaces_enabled() || self.refreshes_blocked() || self.is_in_drag()
+            || !self.native_workspaces.switches.is_empty()
+        {
+            return Err("Native desktop topology is unavailable or changing; try again".into());
+        }
+        let origin = self.workspace_command_space().ok_or("No active workspace")?;
+        let store = self.layout_manager.layout_engine.workspaces();
+        let target = store.resolve_workspace(origin, &WorkspaceSelector::Index(index))
+            .ok_or_else(|| format!("Workspace index {index} was not found"))?.space;
+        let screen = self.native_desktop_screen(target).ok_or("Workspace display is unavailable")?;
+        let display_uuid = screen.display_uuid.clone();
+        let current = crate::sys::screen::current_space_for_display_uuid(&display_uuid)
+            .ok_or("Could not confirm the display's current Space; nothing was removed")?;
+        if screen.space == Some(target) || current == target {
+            return Err("Cannot destroy the current desktop; switch to another desktop first".into());
+        }
+        if !window_server::space_is_user(target.get()) {
+            return Err("Only ordinary desktop Spaces can be destroyed".into());
+        }
+        if self.native_workspaces.destroys.contains_key(&target) {
+            return Err("A request to destroy this desktop is already pending".into());
+        }
+        if !native_spaces::destroy(target) {
+            return Err("SkyLight rejected desktop removal or the private API is unavailable".into());
+        }
+        self.native_workspaces.destroys.insert(target, (display_uuid.clone(), Instant::now() + CONFIRMATION_TIMEOUT));
+        self.request_space_snapshot();
+        self.schedule_native_workspace_tick();
+        Ok((target, display_uuid))
     }
 
     pub(super) fn begin_native_workspace_switch(
@@ -273,7 +314,9 @@ impl Reactor {
         focus: Option<WindowId>,
         overview: Option<Event>,
     ) -> bool {
-        if self.refreshes_blocked() || self.is_in_drag() {
+        if self.refreshes_blocked() || self.is_in_drag()
+            || self.native_workspaces.destroys.contains_key(&target)
+        {
             return false;
         }
         let Some(display) =
@@ -517,6 +560,7 @@ impl Reactor {
                 self.native_workspaces.creates.insert(id, (display_uuid, deadline));
             }
         }
+        self.advance_native_destroys(now);
         let moves = std::mem::take(&mut self.native_workspaces.moves);
         for mut request in moves {
             let origin = self.workspace_command_space();
@@ -584,7 +628,8 @@ impl Reactor {
         }
         if tick
             && (!self.native_workspaces.switches.is_empty()
-                || !self.native_workspaces.creates.is_empty())
+                || !self.native_workspaces.creates.is_empty()
+                || !self.native_workspaces.destroys.is_empty())
         {
             self.request_space_snapshot();
         }
@@ -592,8 +637,25 @@ impl Reactor {
             || !self.native_workspaces.moves.is_empty()
             || !self.native_workspaces.creates.is_empty()
             || !self.native_workspaces.queued_navigation.is_empty()
+            || !self.native_workspaces.destroys.is_empty()
         {
             self.schedule_native_workspace_tick();
+        }
+    }
+
+    fn advance_native_destroys(&mut self, now: Instant) {
+        let pending = std::mem::take(&mut self.native_workspaces.destroys);
+        for (space, (display_uuid, deadline)) in pending {
+            let confirmed = !self.refreshes_blocked()
+                && self.space_state.display_space_ids.get(&display_uuid).is_some_and(|ids| !ids.is_empty())
+                && !self.space_state.display_space_ids.values().any(|ids| ids.contains(&space));
+            if confirmed {
+                self.layout_manager.layout_engine.forget_native_workspace(&mut self.state.windows, space);
+            } else if now < deadline {
+                self.native_workspaces.destroys.insert(space, (display_uuid, deadline));
+            } else {
+                warn!(?space, "Native desktop removal was not confirmed");
+            }
         }
     }
 

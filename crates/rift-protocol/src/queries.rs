@@ -137,6 +137,9 @@ pub struct WindowData {
 pub struct WorkspaceData {
     pub id: String,
     pub index: usize,
+    /// Native macOS Space ID; distinct from the zero-based Rift index.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub space_id: Option<u64>,
     pub name: String,
     pub layout_mode: String,
     pub is_active: bool,

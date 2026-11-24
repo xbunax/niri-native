@@ -43,6 +43,10 @@ pub enum RiftRequest {
         display_uuid: String,
     },
     GetDisplays,
+    /// Submit creation of an ordinary macOS desktop on the active display.
+    CreateWorkspace,
+    /// Request removal of an inactive native desktop by its zero-based workspace index.
+    DestroyWorkspace { workspace_id: usize },
     GetWindows {
         space_id: Option<u64>,
     },

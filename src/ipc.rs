@@ -328,6 +328,11 @@ fn encode_reactor_response(reactor: &mut reactor::Reactor, request: RiftRequest)
             )
         }
 
+        RiftRequest::CreateWorkspace => workspace_mutation_reply(reactor.create_native_workspace_for_cli()),
+        RiftRequest::DestroyWorkspace { workspace_id } => {
+            workspace_mutation_reply(reactor.destroy_native_workspace(workspace_id))
+        }
+
         RiftRequest::GetWindows { space_id } => {
             let windows = reactor.query_windows(space_id.map(crate::sys::screen::SpaceId::new));
             encode_success(
@@ -423,6 +428,15 @@ fn encode_reactor_response(reactor: &mut reactor::Reactor, request: RiftRequest)
             }
         },
         _ => encode_error(serde_json::json!({ "message": "Unsupported request" })),
+    }
+}
+
+fn workspace_mutation_reply(result: Result<(crate::sys::screen::SpaceId, String), String>) -> Vec<u8> {
+    match result {
+        Ok((space_id, display_uuid)) => encode_success(serde_json::json!({
+            "status": "submitted", "space_id": space_id.get(), "display_uuid": display_uuid,
+        })),
+        Err(message) => encode_error(serde_json::json!({ "message": message })),
     }
 }
 

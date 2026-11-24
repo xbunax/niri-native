@@ -38,6 +38,17 @@ Use the `rift-cli` built alongside that binary. Configuration and layout presets
 
 Select `mode = "scrolling"` under `[settings.layout]` to use scrolling for every desktop, or continue using workspace layout rules. Use existing workspace shortcuts or macOS Mission Control to switch, and `create_workspace` to add a desktop. Rift neither provisions the legacy configured workspace count nor removes desktops on startup. macOS owns desktop order, display placement and Space-switch animation; global `workspace_rules.display` pins cannot move a native desktop. The cross-display workspace command moves its windows to the desktop at the same ordinal, rather than moving the macOS desktop itself. Private operations require the SkyLight bridged APIs described in [native-spaces](native-spaces/README.md); there is no simulated fallback for workspace mutations.
 
+### Native workspace CLI
+
+```sh
+./target/release/rift-cli query workspaces
+./target/release/rift-cli execute workspace list  # same JSON as query workspaces
+./target/release/rift-cli execute workspace create
+./target/release/rift-cli execute workspace destroy 2
+```
+
+`list` and `query workspaces` accept `--display <UUID>` and `--space-id <ID>`. Use the zero-based `index` field for `destroy`, not `space_id`. Only an inactive ordinary desktop can be removed. macOS may relocate windows from the removed desktop. Create and destroy return the native `space_id` after the change shows up in the desktop inventory.
+
 ## features
 - multiple layout styles
   - tiling (i3/sway-like)
