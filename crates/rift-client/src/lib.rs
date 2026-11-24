@@ -22,7 +22,7 @@ use serde_json::Value;
 use thiserror::Error;
 
 const MAX_MESSAGE_SIZE: usize = 262_144;
-const DEFAULT_SERVICE_NAME: &str = "git.acsandmann.rift";
+const DEFAULT_SERVICE_NAME: &str = "git.xbunax.rift-native";
 
 type KernReturn = c_int;
 type MachPort = u32;

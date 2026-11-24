@@ -377,6 +377,9 @@ impl LayoutManager {
                     collect_groups.then_some(&mut update.groups),
                     matches!(presentation, Presentation::Instant | Presentation::Force),
                 );
+                if reactor.native_workspaces_enabled() {
+                    layout.retain(|(window, _)| !reactor.native_move_pending(*window));
+                }
                 let engine = &reactor.layout_manager.layout_engine;
                 let bounds = (engine.active_layout_mode_at(space) == LayoutMode::Scrolling)
                     .then(|| {

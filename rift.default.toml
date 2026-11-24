@@ -1,5 +1,5 @@
 # rift config
-# Copy this file to ~/.config/rift/config.toml or $HOME~/.config/rift/config.toml
+# Copy this file to ~/.config/rift-native/config.toml
 
 [settings]
 # Animations
@@ -230,7 +230,7 @@ display_style = "layout"
 # when display_style = "label", add brackets (e.g. "[2]") when a window is in fullscreen
 show_fullscreen_indicator = false
 # .ron files in this folder appear under Layout Files in the menu bar
-layout_folder = "~/.config/rift/layouts"
+layout_folder = "~/.config/rift-native/layouts"
 
 [settings.ui.stack_line]
 # native tabs beside stacked windows (defaults to on)
@@ -249,7 +249,7 @@ spacing = 0.0
 
 # Trackpad gestures
 [settings.gestures]
-# Enable horizontal swipes to switch virtual workspaces
+# Enable horizontal swipes to switch native workspaces
 enabled = false
 # If true, Rift consumes horizontal swipes handled by its trackpad gesture handlers
 # so macOS and the foreground app do not also handle them
@@ -291,15 +291,12 @@ drop_zone_fraction = 0.25
 preview = true
 
 [virtual_workspaces]
-# - per_display (default): each display has its own workspaces, numbered from 1. Like macOS
-#   Spaces, each desktop on a display has its own set.
-# - global: workspaces are numbered across all displays. Each one stays on a single display and
-#   is never mirrored; selecting it focuses that display. Next/previous commands and swipes
-#   navigate across visible displays in global mode, and stay local in per_display mode.
+# The table name is retained for configuration compatibility. Each ordinary macOS
+# desktop is a workspace; next/previous are local in per_display mode and cross
+# connected displays in global mode. macOS supplies the order within each display.
 mode = "per_display"
-# Virtual workspaces
-# - enabled: if false, rift behaves like a simple tiling WM with a single space
-# - default_workspace_count: number of workspaces to create on startup (1–32)
+# Legacy enabled/default_workspace_count keys are accepted. macOS controls the
+# number of desktops; Rift never silently creates or deletes them on startup.
 # - auto_assign_windows: when true, new windows can be auto-assigned using app_rules
 # - preserve_focus_per_workspace: remember last focused window per workspace
 # - workspace_auto_back_and_forth: when enabled, if you try to switch to the same workspace

@@ -14,6 +14,17 @@ impl Reactor {
         command_space: Option<SpaceId>,
         swipe: bool,
     ) -> bool {
+        let native_command_space = command_space.or_else(|| {
+            (self.refreshes_blocked() && super::super::native_workspaces::is_native_workspace_operation(&cmd))
+                .then(|| self.raw_command_space().or_else(|| self.space_state.first_known_space()))
+                .flatten()
+        });
+        if self.native_workspaces_enabled()
+            && let Some(space) = native_command_space
+            && let Some(accepted) = self.native_workspace_command(changes, &cmd, space)
+        {
+            return accepted;
+        }
         let single;
         let multiple;
         let visible_space_frames;
@@ -101,7 +112,7 @@ impl Reactor {
             self.workspace_switch_manager.mark_workspace_switch_inactive();
         }
 
-        let response = if is_virtual_workspace_command {
+        let mut response = if is_virtual_workspace_command {
             command_space
                 .map(|space| {
                     self.layout_manager.layout_engine.handle_virtual_workspace_command(
@@ -128,6 +139,16 @@ impl Reactor {
             )
         };
 
+        if let Some((target, direction, windows)) = response.native_directional_move.take() {
+            return self.submit_native_directional_move(&windows, target, direction);
+        }
+        if self.native_workspaces_enabled()
+            && workspace_layout
+            && response.layout_space.is_some_and(|space| !self.is_space_active(space))
+        {
+            response.focus_window = None;
+            response.raise_windows.clear();
+        }
         if is_virtual_workspace_command && !response.changed && response.workspace_space.is_none() {
             if is_workspace_switch {
                 self.workspace_switch_manager.mark_workspace_switch_inactive();

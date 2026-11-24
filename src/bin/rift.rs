@@ -209,6 +209,7 @@ Enable it in System Settings > Desktop & Dock (Mission Control) and restart Rift
     } else {
         LayoutEngine::new(&config.virtual_workspaces, &config.settings.layout)
     };
+    layout.enable_native_workspaces();
     if let Err(error) = layout.finish_loading(&config.virtual_workspaces, &config.settings.layout) {
         eprintln!("Could not apply workspace settings to restored layout: {error}");
         process::exit(1);

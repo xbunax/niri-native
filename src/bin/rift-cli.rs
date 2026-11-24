@@ -81,7 +81,7 @@ struct SpaceScopeArgs {
 
 #[derive(Subcommand)]
 enum QueryCommands {
-    /// List virtual workspaces (optionally for a specific MacOS space)
+    /// List native workspaces (optionally scoped to a display's Spaces)
     Workspaces {
         #[command(flatten)]
         scope: SpaceScopeArgs,
@@ -101,7 +101,7 @@ enum QueryCommands {
     Layout {
         #[command(flatten)]
         scope: SpaceScopeArgs,
-        /// Virtual workspace index; defaults to the active workspace
+        /// Workspace index; defaults to the active workspace
         #[arg(long)]
         workspace_id: Option<usize>,
     },
@@ -127,7 +127,7 @@ enum ExecuteCommands {
         #[command(subcommand)]
         window_cmd: WindowCommands,
     },
-    /// Virtual workspace commands
+    /// Workspace commands
     Workspace {
         #[command(subcommand)]
         workspace_cmd: WorkspaceCommands,
@@ -270,7 +270,7 @@ struct LayoutFileSelection {
     /// Layout file path.
     #[arg(value_name = "PATH")]
     path: Option<PathBuf>,
-    /// Use Rift's master file (~/.rift/layout.ron).
+    /// Use Rift's master file (~/.rift-native/layout.ron).
     #[arg(long)]
     master: bool,
 }

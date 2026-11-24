@@ -8,7 +8,53 @@ fn git(args: &[&str]) -> Option<String> {
         .then(|| String::from_utf8_lossy(&output.stdout).trim().to_owned())
 }
 
+fn native_spaces_bridge() {
+    println!("cargo:rerun-if-changed=native-spaces/bridge.m");
+    if std::env::var("CARGO_CFG_TARGET_OS").as_deref() != Ok("macos") {
+        return;
+    }
+    let out = std::path::PathBuf::from(std::env::var_os("OUT_DIR").unwrap());
+    let object = out.join("rift_native_spaces.o");
+    let archive = out.join("librift_native_spaces.a");
+    let arch = std::env::var("CARGO_CFG_TARGET_ARCH").unwrap();
+    let arch = if arch == "aarch64" { "arm64" } else { &arch };
+    assert!(
+        Command::new("xcrun")
+            .args([
+                "--sdk",
+                "macosx",
+                "clang",
+                "-arch",
+                arch,
+                "-fobjc-arc",
+                "-Wall",
+                "-Wextra",
+                "-Werror",
+                "-c",
+                "native-spaces/bridge.m",
+                "-o"
+            ])
+            .arg(&object)
+            .status()
+            .expect("run macOS clang")
+            .success()
+    );
+    assert!(
+        Command::new("xcrun")
+            .args(["ar", "crs"])
+            .arg(&archive)
+            .arg(&object)
+            .status()
+            .expect("run macOS ar")
+            .success()
+    );
+    println!("cargo:rustc-link-search=native={}", out.display());
+    println!("cargo:rustc-link-lib=static=rift_native_spaces");
+    println!("cargo:rustc-link-lib=framework=Foundation");
+}
+
 fn main() {
+    native_spaces_bridge();
     for path in ["--git-dir", "--git-common-dir"] {
         if let Some(dir) = git(&["rev-parse", path]) {
             for entry in ["HEAD", "refs", "packed-refs", "index"] {

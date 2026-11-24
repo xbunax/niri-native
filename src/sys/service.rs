@@ -11,7 +11,7 @@ use clap::Subcommand;
 use nix::unistd::getuid;
 
 const LAUNCHCTL_PATH: &str = "/bin/launchctl";
-const RIFT_PLIST: &str = "git.acsandmann.rift";
+const RIFT_PLIST: &str = "git.xbunax.rift-native";
 
 #[derive(Subcommand)]
 pub enum ServiceCommands {
@@ -54,75 +54,19 @@ fn plist_path() -> io::Result<PathBuf> {
     Ok(home.join("Library").join("LaunchAgents").join(format!("{RIFT_PLIST}.plist")))
 }
 
-// Preserve Homebrew's opt symlink rather than canonicalizing into the Cellar.
-fn bundle_executable(path: PathBuf) -> PathBuf {
-    if let Ok(real) = path.canonicalize() {
-        for ancestor in real.ancestors() {
-            if ancestor.file_name().is_some_and(|name| name == "Cellar") {
-                if let Ok(relative) = real.strip_prefix(ancestor) {
-                    let mut parts = relative.components();
-                    if parts.next().is_some_and(|part| part.as_os_str() == "rift") {
-                        let stable = ancestor
-                            .parent()
-                            .unwrap()
-                            .join("opt/rift/Rift.app/Contents/MacOS/rift");
-                        if stable.is_file() {
-                            return stable;
-                        }
-                    }
-                }
-            }
-        }
-    }
-    path
-}
-
-fn find_rift_executable_in_path(path_env: &std::ffi::OsStr) -> io::Result<Option<PathBuf>> {
-    let mut current_dir: Option<PathBuf> = None;
-    for dir in env::split_paths(path_env) {
-        let candidate = dir.join("rift");
-        if candidate.is_file() {
-            if candidate.is_absolute() {
-                return Ok(Some(bundle_executable(candidate)));
-            }
-
-            let base = match current_dir.as_ref() {
-                Some(dir) => dir,
-                None => {
-                    current_dir = Some(env::current_dir()?);
-                    current_dir.as_ref().expect("just set")
-                }
-            };
-            return Ok(Some(bundle_executable(base.join(candidate))));
-        }
-    }
-    Ok(None)
-}
-
 fn find_rift_executable() -> io::Result<PathBuf> {
-    if let Some(path_env) = env::var_os("PATH") {
-        if let Some(candidate) = find_rift_executable_in_path(&path_env)? {
-            return Ok(candidate);
-        }
-    }
+    sibling_daemon(&env::current_exe()?)
+}
 
-    let exe_path = env::current_exe().map_err(|_| {
-        io::Error::new(
-            io::ErrorKind::Other,
-            "unable to retrieve path of current executable",
-        )
-    })?;
+fn sibling_daemon(exe_path: &Path) -> io::Result<PathBuf> {
+    // Do not resolve a same-named upstream Rift from PATH or Homebrew.
     let sibling = exe_path.with_file_name("rift");
     if sibling.is_file() {
-        return Ok(bundle_executable(sibling));
+        return Ok(sibling);
     }
-
     Err(io::Error::new(
         io::ErrorKind::NotFound,
-        format!(
-            "rift agent executable not found: not present in $PATH and no sibling 'rift' next to current executable ('{}')",
-            exe_path.display()
-        ),
+        format!("Native Rift daemon not found next to {}", exe_path.display()),
     ))
 }
 
@@ -173,9 +117,9 @@ fn plist_contents() -> io::Result<String> {
         <true/>
     </dict>
     <key>StandardOutPath</key>
-    <string>/tmp/rift_{user}.out.log</string>
+    <string>/tmp/rift-native_{user}.out.log</string>
     <key>StandardErrorPath</key>
-    <string>/tmp/rift_{user}.err.log</string>
+    <string>/tmp/rift-native_{user}.err.log</string>
     <key>ProcessType</key>
     <string>Interactive</string>
     <key>LimitLoadToSessionType</key>
@@ -443,7 +387,7 @@ mod tests {
     }
 
     #[test]
-    fn find_rift_executable_prefers_stable_symlink_path() {
+    fn native_service_uses_only_sibling_daemon() {
         let tmp = tempfile::tempdir().unwrap();
         let dir = tmp.path();
 
@@ -460,9 +404,7 @@ mod tests {
         let link = dir.join("rift");
         unix_fs::symlink(&real, &link).unwrap();
 
-        let found = find_rift_executable_in_path(dir.as_os_str())
-            .unwrap()
-            .expect("expected to find rift in PATH");
-        assert_eq!(found, link);
+        assert_eq!(sibling_daemon(&dir.join("rift-cli")).unwrap(), link);
+        assert_eq!(sibling_daemon(&dir.join("elsewhere/rift-cli")).unwrap_err().kind(), io::ErrorKind::NotFound);
     }
 }

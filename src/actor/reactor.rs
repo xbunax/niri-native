@@ -13,6 +13,7 @@ pub(crate) use crate::layout_engine::WorkspaceDropRequest as OverviewDrop;
 mod main_window;
 mod managers;
 mod native_tabs;
+mod native_workspaces;
 mod query;
 mod replay;
 pub mod transaction_manager;
@@ -192,6 +193,8 @@ pub struct OverviewTarget {
 pub enum Event {
     #[serde(skip)]
     CameraFinished,
+    #[serde(skip)]
+    NativeWorkspacesTick,
     #[serde(skip)]
     OverviewSelectWorkspace {
         display: String,
@@ -408,6 +411,7 @@ pub struct Reactor {
     mouse_inventory_hit: Option<WindowServerId>,
     drag_manager: managers::DragManager,
     workspace_switch_manager: managers::WorkspaceSwitchManager,
+    native_workspaces: native_workspaces::NativeWorkspaces,
     recording_manager: managers::RecordingManager,
     communication_manager: managers::CommunicationManager,
     notification_manager: managers::NotificationManager,
@@ -515,6 +519,7 @@ impl Reactor {
                 active_workspace_switch: None,
                 pending_workspace_switch_origin: None,
             },
+            native_workspaces: Default::default(),
             recording_manager: managers::RecordingManager { record },
             communication_manager: managers::CommunicationManager {
                 input_tx: None,
@@ -1267,6 +1272,13 @@ impl Reactor {
 
     fn should_quarantine_unstable_topology(&self, event: &Event) -> bool {
         if !self.refreshes_blocked() {
+            return false;
+        }
+        if self.native_workspaces_enabled()
+            && let Event::Command(Command::Layout(command)) = event
+            && native_workspaces::is_native_workspace_operation(command)
+        {
+            // Native workspace operations queue until the desktop transition settles.
             return false;
         }
 
@@ -2055,6 +2067,11 @@ impl Reactor {
                 self.drag_manager.sync_preview();
                 return Ok(());
             }
+            Event::NativeWorkspacesTick => {
+                self.native_workspaces.on_tick();
+                self.advance_native_workspaces(changes, true);
+                return Ok(());
+            }
             Event::OverviewSelectWorkspace {
                 display,
                 workspace,
@@ -2072,6 +2089,13 @@ impl Reactor {
                     return Ok(());
                 };
                 if !self.is_space_active(space) {
+                    if self.native_workspaces_enabled()
+                        && let Some(start) = self.workspace_command_space()
+                    {
+                        self.begin_native_workspace_switch(changes, start, space, window, Some(
+                            Event::OverviewSelectWorkspace { display, workspace, window, transition },
+                        ));
+                    }
                     return Ok(());
                 }
                 let changed =
@@ -2141,6 +2165,13 @@ impl Reactor {
                     .workspaces
                     .get(intent.workspace)
                     .map(|ws| ws.space);
+                if self.native_workspaces_enabled()
+                    && let Some(destination) = destination
+                    && self.assigned_space_for_window_id(intent.window) != Some(destination)
+                {
+                    self.submit_native_overview_drop(intent, destination, reply);
+                    return Ok(());
+                }
                 let valid = self.state.windows.window(intent.window).is_some_and(|window| {
                     self.state.windows.is_admitted(intent.window)
                         && window.info.is_standard
@@ -2338,6 +2369,12 @@ impl Reactor {
                 let before = pins(&self.layout_manager.layout_engine);
                 self.apply_config(changes, new_cfg)?;
                 let after = pins(&self.layout_manager.layout_engine);
+                if self.native_workspaces_enabled() {
+                    self.sync_native_workspaces(&[]);
+                    changes.overview_changed = self.config.settings.ui.mission_control.enabled;
+                    changes.refresh_menu = true;
+                    return Ok(());
+                }
                 if before != after {
                     let workspaces = self.layout_manager.layout_engine.workspaces();
                     let visible_pin_changed = before.iter().chain(&after).any(|pin| {
@@ -2578,7 +2615,7 @@ impl Reactor {
                 if source_space == target_space {
                     return Ok(());
                 }
-                if self.ensure_window_move_destination(changes, target_space).is_some() {
+                if self.native_workspaces_enabled() || self.ensure_window_move_destination(changes, target_space).is_some() {
                     // Fence retained scrolling frames before installing the destination frame.
                     self.cancel_window_presentations(vec![window]);
                     self.move_window_to_display(changes, window, source_space, target_space);
@@ -2623,6 +2660,10 @@ impl Reactor {
                     );
                     return Ok(());
                 };
+                if self.native_workspaces_enabled() {
+                    self.move_native_workspace_to_display(changes, source_space, target_space);
+                    return Ok(());
+                }
                 // An explicit destination overrides the pin even while its display
                 // is unavailable; reconnecting must not undo the user's choice.
                 let workspaces = self.layout_manager.layout_engine.workspaces();
@@ -3558,6 +3599,14 @@ impl Reactor {
 
         self.refocus_manager.stale_cleanup_state = StaleCleanupState::Enabled;
         let previous_screens = std::mem::replace(&mut self.space_state.screens, screens);
+        if self.native_workspaces_enabled() {
+            for space in destroyed_spaces.iter().copied().filter(|space| {
+                !self.space_state.display_space_ids.values().any(|ids| ids.contains(space))
+            }) {
+                self.layout_manager.layout_engine.forget_native_workspace(&mut self.state.windows, space);
+            }
+            self.sync_native_workspaces(&previous_screens);
+        }
         // macOS may resize windows without AX notifications during display changes.
         // Reapply the complete layout even when cached frames still match.
         let force_frames = display_set_changed
@@ -3601,6 +3650,9 @@ impl Reactor {
                 .update_display_count(display_count);
         }
         for (previous_space, space) in space_remaps {
+            if self.native_workspaces_enabled() {
+                continue;
+            }
             if let Some(frame) = self.last_screen_frames.remove(&previous_space) {
                 self.last_screen_frames.insert(space, frame);
             }
@@ -3647,7 +3699,7 @@ impl Reactor {
                 );
             }
         }
-        if display_set_changed
+        if !self.native_workspaces_enabled() && (display_set_changed
             || invalidates_pending_targets
             || previous_screens
                 .iter()
@@ -3656,7 +3708,7 @@ impl Reactor {
                     .space_state
                     .screens
                     .iter()
-                    .map(|s| (s.display_uuid_opt(), s.space, s.frame)))
+                    .map(|s| (s.display_uuid_opt(), s.space, s.frame))))
         {
             self.reconcile_workspace_placements(
                 changes,
@@ -3710,6 +3762,9 @@ impl Reactor {
             if self.is_space_active(space) {
                 changes.arrange(Some(space), Presentation::Force);
             }
+        }
+        if self.native_workspaces_enabled() {
+            self.advance_native_workspaces(changes, false);
         }
         let active_windows = self.authoritative_active_space_windows();
         self.finalize_space_change(
@@ -4781,7 +4836,9 @@ impl Reactor {
             }
             _ => None,
         };
-        let transfer = if let LayoutEvent::WindowObserved(source, resolved) = &event {
+        let transfer = if !self.native_workspaces_enabled()
+            && let LayoutEvent::WindowObserved(source, resolved) = &event
+        {
             let window = resolved.info.window_id;
             let target =
                 self.layout_manager.layout_engine.workspaces()[resolved.effects.workspace_id].space;
@@ -6208,7 +6265,7 @@ impl Reactor {
         if let Some(id) = workspaces.active_workspace(space) {
             return Some(id);
         }
-        if workspaces.effective_mode() != crate::common::config::WorkspaceMode::Global {
+        if workspaces.native || workspaces.effective_mode() != crate::common::config::WorkspaceMode::Global {
             return None;
         }
         match workspaces.create_workspace(space, None) {
@@ -6232,6 +6289,11 @@ impl Reactor {
         source: SpaceId,
         target: SpaceId,
     ) {
+        if self.native_workspaces_enabled() {
+            let focus = (self.main_window() == Some(window)).then_some(window);
+            self.submit_native_move(&[window], target, focus.is_some(), focus, None);
+            return;
+        }
         let Some(screen) = self.space_state.screen_by_space(target) else {
             return;
         };

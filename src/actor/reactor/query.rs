@@ -350,8 +350,9 @@ impl Reactor {
         let context =
             crate::model::virtual_workspace::WorkspaceContext { space, visible: &visible };
         let view = store.workspace_view(context);
-        view.filter(|(_, id)| owner.is_none_or(|owner| store[*id].space == owner))
-            .collect()
+        view.filter(|(_, id)| owner.is_none_or(|owner| {
+            store[*id].space == owner || (store.native && store.same_native_display(store[*id].space, owner))
+        })).collect()
     }
 
     /// The workspaces `space` owns. A global catalog view spans every visible display,
@@ -369,9 +370,8 @@ impl Reactor {
             .map(|(index, id)| {
                 let name = self.layout_manager.layout_engine.workspaces()[id].name.clone();
                 let space = self.layout_manager.layout_engine.workspaces()[id].space;
-                let is_active =
-                    self.layout_manager.layout_engine.workspaces().active_workspace(space)
-                        == Some(id);
+                let is_active = (!self.native_workspaces_enabled() || self.is_space_active(space))
+                    && self.layout_manager.layout_engine.workspaces().active_workspace(space) == Some(id);
                 let mut windows = self.state.windows.workspace_windows(id);
                 windows.retain(|wid| {
                     self.app_manager.apps.contains_key(&wid.pid)
@@ -489,14 +489,13 @@ impl Reactor {
                 &self.layout_manager.layout_engine.workspaces()[*workspace_id].name;
             let space = self.layout_manager.layout_engine.workspaces()[*workspace_id].space;
             let index = *index;
-            let is_active = self.layout_manager.layout_engine.workspaces().active_workspace(space)
-                == Some(*workspace_id);
+            let is_active = (!self.native_workspaces_enabled() || self.is_space_active(space))
+                && self.layout_manager.layout_engine.workspaces().active_workspace(space) == Some(*workspace_id);
             let workspace_windows_ids = self.state.windows.workspace_windows(*workspace_id);
             let predicted_positions = if is_active {
                 Vec::new()
             } else {
-                self.space_state
-                    .screen_by_space(space)
+                self.native_desktop_screen(space)
                     .or_else(|| self.space_state.screens.first())
                     .map(|screen| {
                         let gaps = self
@@ -519,9 +518,7 @@ impl Reactor {
             let predicted_map: std::collections::HashMap<WindowId, CGRect> =
                 predicted_positions.into_iter().collect();
             let logical_positions = self.logical_window_positions_for(Some(space), Some(index));
-            let layout_frames = self
-                .space_state
-                .screen_by_space(space)
+            let layout_frames = self.native_desktop_screen(space)
                 .map(|screen| {
                     let gaps = self
                         .config
@@ -574,10 +571,7 @@ impl Reactor {
             workspaces.push(RuntimeWorkspaceData {
                 workspace_id: *workspace_id,
                 focused_window,
-                display_frame: self
-                    .space_state
-                    .screen_by_space(space)
-                    .map_or(CGRect::ZERO, |s| s.frame),
+                display_frame: self.native_desktop_screen(space).map_or(CGRect::ZERO, |s| s.frame),
                 space,
                 id: format!("{:?}", workspace_id),
                 name: workspace_name.to_string(),
@@ -618,7 +612,8 @@ impl Reactor {
                     index,
                     name: workspace.name.clone(),
                     layout_mode: workspace.layout_mode().to_string(),
-                    is_active: workspaces.active_workspace(workspace.space) == Some(id),
+                    is_active: (!workspaces.native || self.is_space_active(workspace.space))
+                        && workspaces.active_workspace(workspace.space) == Some(id),
                 }
             })
             .collect()

@@ -23,6 +23,21 @@
   </p>
 </div>
 
+## Native Spaces fork
+
+This branch replaces virtual desktops with ordinary macOS Spaces. It keeps the Rift command and configuration syntax, including the `[virtual_workspaces]` table, and uses the existing layouts (including niri-style scrolling). Normal desktops appear in both Rift's overview and macOS Mission Control. Fullscreen Spaces are not workspace targets.
+
+```sh
+cargo build --release --bins
+mkdir -p ~/.config/rift-native
+cp -n rift.default.toml ~/.config/rift-native/config.toml
+./target/release/rift
+```
+
+Use the `rift-cli` built alongside that binary. Configuration and layout presets are under `~/.config/rift-native/`, the saved layout is `~/.rift-native/layout.ron`, and IPC and launchd use `git.xbunax.rift-native`. Keep these binaries together in a separate directory from upstream Rift. **Stop the original window manager before starting this fork**: separate configuration does not isolate frame writes or hotkeys in the same GUI session. The upstream install links below are not native-fork installation instructions.
+
+Select `mode = "scrolling"` under `[settings.layout]` to use scrolling for every desktop, or continue using workspace layout rules. Use existing workspace shortcuts or macOS Mission Control to switch, and `create_workspace` to add a desktop. Rift neither provisions the legacy configured workspace count nor removes desktops on startup. macOS owns desktop order, display placement and Space-switch animation; global `workspace_rules.display` pins cannot move a native desktop. The cross-display workspace command moves its windows to the desktop at the same ordinal, rather than moving the macOS desktop itself. Private operations require the SkyLight bridged APIs described in [native-spaces](native-spaces/README.md); there is no simulated fallback for workspace mutations.
+
 ## features
 - multiple layout styles
   - tiling (i3/sway-like)

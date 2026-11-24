@@ -20,10 +20,10 @@ pub(super) const DEPRECATED_MAP: &[(&str, &str)] = &[
     ("toggle_tile_orientation", "toggle_orientation"),
 ];
 
-pub fn data_dir() -> PathBuf { dirs::home_dir().unwrap().join(".rift") }
+pub fn data_dir() -> PathBuf { dirs::home_dir().unwrap().join(".rift-native") }
 pub fn restore_file() -> PathBuf { data_dir().join("layout.ron") }
 pub fn config_file() -> PathBuf {
-    dirs::home_dir().unwrap().join(".config").join("rift").join("config.toml")
+    dirs::home_dir().unwrap().join(".config").join("rift-native").join("config.toml")
 }
 
 #[derive(Serialize, Deserialize, Debug, PartialEq, Clone, Copy, Default, Eq, ConfigEnum)]
@@ -1877,7 +1877,7 @@ fn default_animation_duration() -> f64 { 0.3 }
 
 fn default_animation_fps() -> f64 { 100.0 }
 
-fn default_layout_folder() -> PathBuf { PathBuf::from("~/.config/rift/layouts") }
+fn default_layout_folder() -> PathBuf { PathBuf::from("~/.config/rift-native/layouts") }
 
 fn default_workspace_count() -> usize { 4 }
 

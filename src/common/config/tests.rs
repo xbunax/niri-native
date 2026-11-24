@@ -322,10 +322,10 @@ fn menu_bar_fullscreen_indicator_defaults_off_and_can_be_enabled() {
 fn menu_bar_layout_folder_defaults_and_expands_home() {
     let settings: MenuBarSettings = toml::from_str("").unwrap();
 
-    assert_eq!(settings.layout_folder, PathBuf::from("~/.config/rift/layouts"));
+    assert_eq!(settings.layout_folder, PathBuf::from("~/.config/rift-native/layouts"));
     assert_eq!(
         settings.resolved_layout_folder(),
-        dirs::home_dir().unwrap().join(".config/rift/layouts")
+        dirs::home_dir().unwrap().join(".config/rift-native/layouts")
     );
 }
 

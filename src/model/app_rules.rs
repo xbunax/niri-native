@@ -42,6 +42,7 @@ pub struct AppRuleEffects {
     pub source_workspace: Option<VirtualWorkspaceId>,
     pub workspace_id: VirtualWorkspaceId,
     pub(crate) names_workspace: bool,
+    pub(crate) native_destination: Option<SpaceId>,
     pub floating: bool,
     pub position: Option<AppRulePosition>,
     pub size: Option<AppRuleSize>,

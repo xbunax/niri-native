@@ -39,6 +39,22 @@ impl LayoutEngine {
         let saved = std::mem::take(&mut self.persistence.unresolved_spaces);
         let opened = std::mem::take(&mut self.persistence.awaiting_topology);
         let exists = |space: &SpaceId| inventory.values().any(|spaces| spaces.contains(space));
+        if self.workspaces.native {
+            for space in saved {
+                if exists(&space) {
+                    continue;
+                }
+                if self.display_uuid_for_space(space).is_some_and(|display| !inventory.contains_key(display)) {
+                    self.persistence.unresolved_spaces.insert(space);
+                } else {
+                    self.forget_native_workspace(window_store, space);
+                }
+            }
+            if opened {
+                self.settle_awaited_windows(window_store);
+            }
+            return;
+        }
 
         let proposed: Vec<(SpaceId, SpaceId)> = current_spaces
             .iter()

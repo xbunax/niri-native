@@ -1876,7 +1876,6 @@ impl OverviewSession {
                 topology.iter().any(|s| {
                     s.is_visible_space
                         && s.info.id == d.info.id
-                        && s.info.space == d.info.space
                         && s.info.frame == d.info.frame
                         && s.info.backing_scale == d.scale
                 })
@@ -1903,7 +1902,7 @@ impl OverviewSession {
                         && s.info.backing_scale == d.scale
                 }) && {
                     let mut incoming = catalog.iter().filter(|w| {
-                        (self.shared || Some(w.space) == d.info.space)
+                        (self.shared || w.display_uuid.as_deref() == Some(d.info.display_uuid.as_str()))
                             && (self.show_empty || !w.windows.is_empty())
                     });
                     d.workspaces.iter().all(|a| {
@@ -1917,10 +1916,10 @@ impl OverviewSession {
             return;
         }
         let shared = self.shared;
-        let workspaces_for = |space| {
+        let workspaces_for = |display: &str| {
             catalog
                 .iter()
-                .filter(|w| shared || Some(w.space) == space)
+                .filter(|w| shared || w.display_uuid.as_deref() == Some(display))
                 .cloned()
                 .collect::<Vec<_>>()
         };
@@ -1974,7 +1973,7 @@ impl OverviewSession {
             {
                 continue;
             }
-            let mut workspaces = workspaces_for(native.info.space);
+            let mut workspaces = workspaces_for(&native.info.display_uuid);
             if self.shared {
                 for ws in &mut workspaces {
                     ws.is_active &= Some(ws.space) == native.info.space;
@@ -2011,7 +2010,7 @@ impl OverviewSession {
         let pixels = CAPTURE_PIXELS / self.displays.len().max(1);
         for d in &mut self.displays {
             d.capture_pixels = pixels;
-            d.workspaces = workspaces_for(d.info.space);
+            d.workspaces = workspaces_for(&d.info.display_uuid);
             if self.shared {
                 for ws in &mut d.workspaces {
                     ws.is_active &= Some(ws.space) == d.info.space;

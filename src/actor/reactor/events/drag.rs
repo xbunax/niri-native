@@ -155,14 +155,18 @@ impl Reactor {
                         )
                     })
             });
+            let intent = crate::layout_engine::WorkspaceDropRequest {
+                window,
+                workspace: destination,
+                target: relocation_target,
+                frame,
+            };
+            if self.native_workspaces_enabled() && space != owner {
+                self.submit_native_move(&[window], space, false, None, Some(intent));
+                return;
+            }
             if self.layout_manager.layout_engine.relocate_window_with_drop(
-                &mut self.state.windows,
-                &crate::layout_engine::WorkspaceDropRequest {
-                    window,
-                    workspace: destination,
-                    target: relocation_target,
-                    frame,
-                },
+                &mut self.state.windows, &intent,
             ) && space != owner
             {
                 changes.move_between(owner, space, Presentation::Animated);

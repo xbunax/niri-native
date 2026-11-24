@@ -21,6 +21,7 @@ pub mod haptics;
 pub mod hotkey;
 pub mod installed_apps;
 pub mod mach;
+pub(crate) mod native_spaces;
 pub mod observer;
 pub mod power;
 pub mod process;

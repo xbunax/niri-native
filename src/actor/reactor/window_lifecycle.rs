@@ -335,7 +335,14 @@ impl Reactor {
         // Restored windows retain their logical owner even when macOS restores
         // them on the current display or their last frame is parked offscreen.
         let assigned_space = self.assigned_space_for_window_id(window);
-        let active_space = assigned_space.or_else(|| {
+        let native = self.native_workspaces_enabled().then(|| {
+            let wsid = self.state.windows.record(window)?.window_server_id()?;
+            match crate::sys::window_server::window_spaces(wsid).as_slice() {
+                [space] if self.native_desktop_screen(*space).is_some() && !self.is_fullscreen_space(*space) => Some(*space),
+                _ => None,
+            }
+        }).flatten();
+        let active_space = native.or(assigned_space).or_else(|| {
             let state = self.state.windows.window(window)?;
             self.best_space_for_window(&state.frame_monotonic, state.info.sys_id)
                 .filter(|space| self.is_space_active(*space))
@@ -372,6 +379,7 @@ impl Reactor {
         };
         self.project_observed_window(changes, space, window, effects);
         if pointer_placement
+            && (!self.native_workspaces_enabled() || self.is_space_active(space))
             && effects.source_workspace.is_none()
             && !effects.names_workspace
             && !self.is_dragging_window(window)
@@ -388,6 +396,13 @@ impl Reactor {
         window: WindowId,
         effects: AppRuleEffects,
     ) {
+        let mut effects = effects;
+        if let Some(target) = effects.native_destination.take() {
+            let follow = effects.focus;
+            if self.submit_native_move(&[window], target, follow, Some(window), None) {
+                effects.focus = false;
+            }
+        }
         if let Some(state) = self.state.windows.window(window) {
             self.reconcile_layout_event(
                 changes,
@@ -449,7 +464,14 @@ impl Reactor {
         self.state.windows.restore_window_from_native_fullscreen(window);
         let available = self.is_space_active(target);
         if native != Some(target) {
-            self.request_window_transfer(changes, window, target, None);
+            if self.native_workspaces_enabled() {
+                if let Some(native) = native {
+                    self.reassign_window_to_authoritative_space(changes, window, native, false);
+                    return;
+                }
+            } else {
+                self.request_window_transfer(changes, window, target, None);
+            }
         }
         // Rejoin the tree even while the owner is dormant; arrange only a visible one.
         self.reconcile_window_membership(changes, window, Some(target));
@@ -495,6 +517,10 @@ impl Reactor {
         space: SpaceId,
         preserve_workspace_ordinal: bool,
     ) {
+        // Preserve the original layout/drop intent until the native move is confirmed.
+        if self.native_workspaces_enabled() && self.native_move_pending(wid) {
+            return;
+        }
         // A claim holds the destination; release replays this reconciliation.
         if self.is_dragging_window(wid)
             || self.state.windows.is_claimed(wid)

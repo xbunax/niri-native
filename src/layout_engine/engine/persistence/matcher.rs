@@ -20,7 +20,7 @@ impl LayoutEngine {
                 // per-display workspace is defined by the one it belongs to.
                 !self.persistence.unresolved_spaces.contains(&destination)
                     && (destination == space
-                        || self.workspaces.effective_mode() == WorkspaceMode::Global)
+                        || (!self.workspaces.native && self.workspaces.effective_mode() == WorkspaceMode::Global))
             }
         }
     }

@@ -406,6 +406,11 @@ pub struct WorkspaceStore {
     pub(crate) settings: VirtualWorkspaceSettings,
     #[serde(skip)]
     pub layout_settings: LayoutSettings,
+    #[serde(skip)]
+    pub(crate) native: bool,
+    /// Connected ordinary Spaces, mapped to a representative of their display.
+    #[serde(skip)]
+    native_groups: HashMap<SpaceId, SpaceId>,
 }
 
 /// A rule's `display` only applies in global mode; say so rather than ignore it silently.
@@ -484,7 +489,8 @@ impl WorkspaceStore {
     }
 
     fn namespace(&self, mode: WorkspaceMode, space: SpaceId) -> Option<SpaceId> {
-        (mode != WorkspaceMode::Global || self.single_display).then_some(space)
+        (mode != WorkspaceMode::Global || self.single_display)
+            .then(|| self.native_groups.get(&space).copied().unwrap_or(space))
     }
 
     pub(crate) fn workspace_space(&self, id: VirtualWorkspaceId) -> Option<SpaceId> {
@@ -514,6 +520,9 @@ impl WorkspaceStore {
     ) -> Option<VirtualWorkspaceId> {
         if let Some(index) = index {
             self.ensure_space_initialized(space);
+            if self.native {
+                return self.resolve_workspace(space, &WorkspaceSelector::Index(index)).map(|target| target.id);
+            }
             self.workspaces_on(space).nth(index)
         } else {
             self.active_workspace(space)
@@ -530,12 +539,61 @@ impl WorkspaceStore {
 
     fn eligible(&self, context: WorkspaceContext<'_>, id: VirtualWorkspaceId) -> bool {
         let space = self[id].space;
+        if self.native {
+            return self.native_groups.contains_key(&space)
+                && (self.effective_mode() == WorkspaceMode::Global
+                    || self.same_native_display(space, context.space));
+        }
         if self.effective_mode() == WorkspaceMode::PerDisplay {
             space == context.space
         } else {
             context.visible.contains(&space)
                 || (context.visible.is_empty() && space == context.space)
         }
+    }
+
+    pub(crate) fn same_native_display(&self, a: SpaceId, b: SpaceId) -> bool {
+        self.native_groups.get(&a).is_some_and(|owner| self.native_groups.get(&b) == Some(owner))
+    }
+
+    pub(crate) fn native_desktop_at(&self, space: SpaceId, index: usize) -> Option<SpaceId> {
+        self.order.iter().map(|id| self[*id].space)
+            .filter(|&candidate| self.same_native_display(space, candidate)).nth(index)
+    }
+
+    pub(crate) fn sync_native_catalog(&mut self, displays: &[Vec<SpaceId>]) {
+        debug_assert!(self.native);
+        self.single_display = displays.len() == 1;
+        self.native_groups.clear();
+        for spaces in displays {
+            if let Some(&first) = spaces.first() {
+                self.native_groups.extend(spaces.iter().map(|&space| (space, first)));
+            }
+        }
+        let known: HashMap<_, _> = self.order.iter().rev().map(|&id| (self[id].space, id)).collect();
+        let mut global_index = 0;
+        let mut ordered = Vec::new();
+        for spaces in displays {
+            for (local_index, &space) in spaces.iter().enumerate() {
+                let index = if self.effective_mode() == WorkspaceMode::Global { global_index } else { local_index };
+                global_index += 1;
+                let name = self.settings.workspace_name(index);
+                let id = if let Some(&id) = known.get(&space) {
+                    if self[id].name != name {
+                        self[id].name = name;
+                    }
+                    id
+                } else {
+                    let mode = self.resolve_layout_mode_for_workspace(index, &name);
+                    self.insert_workspace(space, name, mode)
+                };
+                self.active_workspace_per_space.insert(space, SpaceActivation::showing(id));
+                ordered.push(id);
+            }
+        }
+        // Keep dormant layouts for disconnected displays, but do not expose them as targets.
+        ordered.extend(self.order.iter().copied().filter(|id| !self.native_groups.contains_key(&self[*id].space)));
+        self.order = ordered;
     }
 
     /// Navigation history, validated like any target. Unreachable history is kept.
@@ -778,6 +836,8 @@ impl WorkspaceStore {
             workspaces: SlotMap::default(),
             order: Vec::new(),
             single_display: false,
+            native: false,
+            native_groups: HashMap::default(),
             active_workspace_per_space: HashMap::default(),
             settings: config.clone(),
             layout_settings: layout_settings.clone(),
@@ -870,7 +930,7 @@ impl WorkspaceStore {
                 continue;
             } // Empty global contexts remain empty.
             let total = planned.entry(namespace(space)).or_insert_with(|| scope_ids(space).count());
-            let missing = config.default_workspace_count.saturating_sub(*total);
+            let missing = if self.native { 0 } else { config.default_workspace_count.saturating_sub(*total) };
             for index in *total..*total + missing {
                 let mut name = config.workspace_name(index);
                 let scope = namespace(space);
@@ -993,6 +1053,9 @@ impl WorkspaceStore {
         if spaces.is_empty() {
             return;
         }
+        if self.native {
+            return;
+        }
         self.update_display_count(display_count);
         if self.effective_mode() == WorkspaceMode::Global
             && self.scope_ids(spaces[0]).next().is_none()
@@ -1025,7 +1088,7 @@ impl WorkspaceStore {
     }
 
     pub(crate) fn ensure_space_initialized(&mut self, space: SpaceId) {
-        if self.active_workspace(space).is_some() {
+        if self.native || self.active_workspace(space).is_some() {
             return;
         }
         let first = self.workspaces_on(space).next();
@@ -1310,17 +1373,27 @@ impl WorkspaceStore {
         skip_empty: Option<bool>,
         dir: Direction,
     ) -> Option<VirtualWorkspaceId> {
+        self.step_workspace_matching(context, current, dir, |id| {
+            skip_empty != Some(true) || window_store.workspace_window_count(id) != 0
+        })
+    }
+
+    pub(crate) fn step_workspace_matching<'a>(
+        &self,
+        context: impl Into<WorkspaceContext<'a>>,
+        current: VirtualWorkspaceId,
+        dir: Direction,
+        non_empty: impl Fn(VirtualWorkspaceId) -> bool,
+    ) -> Option<VirtualWorkspaceId> {
         let context = context.into();
         let eligible = |id| {
             self.eligible(context, id)
-                && (self.effective_mode() == WorkspaceMode::Global
+                && (self.native || self.effective_mode() == WorkspaceMode::Global
                     || self[id].space == context.space)
         };
         if !self.workspaces.contains_key(current) || !eligible(current) {
             return None;
         }
-        let non_empty =
-            |id| skip_empty != Some(true) || window_store.workspace_window_count(id) != 0;
         let mut crossed = false;
         let mut wrapped = None;
         let mut remaining = self.order.iter();
@@ -1662,13 +1735,22 @@ impl WorkspaceStore {
                 "App rule workspace was not found; preserving assignment"
             );
         }
-        let workspace_id = if preserve_existing {
-            existing_assignment.or(selected)
+        let (workspace_id, native_destination) = if self.native {
+            // A rule requests a move but cannot establish native membership.
+            let destination = (!preserve_existing || existing_assignment.is_none())
+                .then_some(selected).flatten().map(|id| self[id].space).filter(|&target| target != space);
+            let current = self.active_workspace(space).ok_or(WorkspaceError::AssignmentFailed)?;
+            (current, destination)
         } else {
-            selected.or(existing_assignment)
-        }
-        .map(Ok)
-        .unwrap_or_else(|| self.get_default_workspace(context))?;
+            let id = if preserve_existing {
+                existing_assignment.or(selected)
+            } else {
+                selected.or(existing_assignment)
+            }
+            .map(Ok)
+            .unwrap_or_else(|| self.get_default_workspace(context))?;
+            (id, None)
+        };
         let prior_assignment = window_store.workspace_for_window(window_id);
         let workspace_changed = prior_assignment != Some(workspace_id);
         if !self.assign_window_to_workspace(
@@ -1683,10 +1765,11 @@ impl WorkspaceStore {
         let was_rule_floating = window_store.replace_rule_floating(window_id, floating);
         // Focus is a placement side effect, not persistent state. Rediscovery may
         // reapply the same rule repeatedly, so only emit it for a real transition.
-        let focus = focus && (workspace_changed || was_rule_floating != floating);
+        let focus = focus && (native_destination.is_some() || workspace_changed || was_rule_floating != floating);
         Ok(AppRuleResult::Managed(AppRuleEffects {
             source_workspace: prior_assignment,
             names_workspace: workspace.is_some(),
+            native_destination,
             workspace_id,
             floating,
             position,
@@ -1785,6 +1868,49 @@ mod tests {
             ax_role,
             ax_subrole,
         ))
+    }
+
+    #[test]
+    fn native_catalog_tracks_desktops_without_allocating_virtual_workspaces() {
+        let [a, b, c, d] = [801, 802, 803, 804].map(SpaceId::new);
+        let settings = VirtualWorkspaceSettings { mode: WorkspaceMode::PerDisplay, ..Default::default() };
+        let mut store = WorkspaceStore::new_with_config(&settings, &LayoutSettings::default());
+        store.native = true;
+        store.sync_native_catalog(&[vec![a, b], vec![c, d]]);
+        let old_b = store.active_workspace(b).unwrap();
+        let windows = WindowStore::default();
+        store.ensure_space_initialized(SpaceId::new(999));
+        assert_eq!(store.order.len(), 4);
+        assert_eq!(store.resolve_workspace(a, &WorkspaceSelector::Index(1)).unwrap().space, b);
+        assert_eq!(store.resolve_workspace(c, &WorkspaceSelector::Index(1)).unwrap().space, d);
+        assert_eq!(store.step_workspace(&windows, b, old_b, None, Direction::Right), store.active_workspace(a));
+        assert_eq!(store.step_workspace(&windows, b, old_b, Some(true), Direction::Right), None);
+        assert_eq!(store.step_workspace_matching(b, old_b, Direction::Right, |id| Some(id) == store.active_workspace(a)), store.active_workspace(a));
+        store.sync_native_catalog(&[vec![b, a]]);
+        assert_eq!(store.active_workspace(b), Some(old_b));
+        assert_eq!(store.workspace_index(b, old_b), Some(0));
+        assert_eq!(store.workspace_view(WorkspaceContext::from(b)).count(), 2);
+        store.sync_native_catalog(&[vec![b, a], vec![c, d]]);
+        store.settings.mode = WorkspaceMode::Global;
+        assert_eq!(store.resolve_workspace(a, &WorkspaceSelector::Index(3)).unwrap().space, d);
+        assert_eq!(store.native_desktop_at(c, 1), Some(d));
+    }
+
+    #[test]
+    fn native_rule_assignment_waits_for_window_server_move() {
+        let [a, b] = [801, 802].map(SpaceId::new);
+        let mut store = WorkspaceStore::new();
+        store.native = true;
+        store.sync_native_catalog(&[vec![a, b]]);
+        let mut windows = WindowStore::default();
+        let wid = WindowId::new(42, 7);
+        let effects = expect_managed(store.apply_app_rule_decision(&mut windows, wid, a,
+            Some(AppRuleDecision { workspace: Some(WorkspaceSelector::Index(1)), focus: true, ..Default::default() }),
+            true,
+        ));
+        assert_eq!(effects.native_destination, Some(b));
+        assert!(effects.focus);
+        assert_eq!(windows.workspace_for_window(wid), store.active_workspace(a));
     }
 
     #[test]

@@ -164,6 +164,8 @@ pub struct EventResponse {
     /// Space edited by a command whose target may differ from the command display.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub layout_space: Option<SpaceId>,
+    #[serde(skip)]
+    pub(crate) native_directional_move: Option<(SpaceId, Direction, Vec<WindowId>)>,
 }
 
 #[must_use]
@@ -855,7 +857,7 @@ impl LayoutEngine {
             .collect()
     }
 
-    fn preferred_focus_for_workspace(
+    pub(crate) fn preferred_focus_for_workspace(
         &self,
         window_store: &WindowStore,
         space: SpaceId,
@@ -2625,6 +2627,10 @@ impl LayoutEngine {
                     {
                         windows.reverse();
                     }
+                    if self.workspaces.native {
+                        response.native_directional_move = Some((space, direction, windows));
+                        return response;
+                    }
                     for wid in windows {
                         if self.relocate_window_to_workspace(
                             window_store,
@@ -2958,7 +2964,11 @@ impl LayoutEngine {
             }
         }
 
-        let hidden_windows = self.workspaces.windows_in_inactive_workspaces(window_store, space);
+        let hidden_windows = if self.workspaces.native {
+            Vec::new()
+        } else {
+            self.workspaces.windows_in_inactive_workspaces(window_store, space)
+        };
         for wid in hidden_windows {
             let original_frame = get_window_frame(wid);
 
@@ -3326,6 +3336,31 @@ impl LayoutEngine {
             }
             _ => EventResponse::default(),
         }
+    }
+
+    pub fn enable_native_workspaces(&mut self) { self.workspaces.native = true; }
+
+    pub(crate) fn forget_native_workspace(&mut self, windows: &mut WindowStore, space: SpaceId) {
+        for id in self.workspaces.remove_space(space) {
+            windows.remap_workspace(id, None);
+            self.forget_workspace(id);
+        }
+        self.space_display_map.remove(&space);
+    }
+
+    pub(crate) fn commit_native_workspace_move(
+        &mut self,
+        windows: &mut WindowStore,
+        window: WindowId,
+        space: SpaceId,
+        direction: Option<Direction>,
+    ) -> bool {
+        let Some(destination) = self.workspaces.active_workspace(space) else { return false };
+        let Some(source) = windows.workspace_for_window(window) else { return false };
+        source == destination || self.relocate_window_to_workspace(
+            windows, source, (space, destination), window,
+            direction.map_or(WindowRelocation::Workspace, WindowRelocation::Directional),
+        )
     }
 
     pub fn workspaces(&self) -> &WorkspaceStore { &self.workspaces }
