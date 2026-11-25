@@ -160,13 +160,27 @@ jobs:
             cmp "$RUNNER_TEMP/bundle.plist" "$RUNNER_TEMP/embedded.plist"
           done
 
+      - name: Check for release signing certificate
+        id: signing
+        env:
+          SIGNING_P12: ${{ secrets.RIFT_SIGNING_P12 }}
+        run: |
+          if [[ -n "$SIGNING_P12" ]]; then
+            echo 'certificate=true' >> "$GITHUB_OUTPUT"
+          else
+            echo 'certificate=false' >> "$GITHUB_OUTPUT"
+            echo 'No certificate configured; signing ad hoc.'
+          fi
+
       - name: Import signing certificate
+        if: steps.signing.outputs.certificate == 'true'
         uses: apple-actions/import-codesign-certs@v7
         with:
           p12-file-base64: ${{ secrets.RIFT_SIGNING_P12 }}
           p12-password: ${{ secrets.RIFT_SIGNING_PASSWORD }}
 
       - name: Trust signing certificate
+        if: steps.signing.outputs.certificate == 'true'
         run: |
           security find-certificate -p signing_temp.keychain \
             > "$RUNNER_TEMP/rift.crt"
@@ -177,15 +191,19 @@ jobs:
             "$RUNNER_TEMP/rift.crt"
 
       - name: Sign release binaries and bundle
+        env:
+          HAS_CERTIFICATE: ${{ steps.signing.outputs.certificate }}
         run: |
           set -euo pipefail
 
-          SIGNER=$(openssl x509 -in "$RUNNER_TEMP/rift.crt" \
-            -noout -fingerprint -sha1 |
-            cut -d= -f2 | tr -d ':')
-
-          security find-identity -v -p codesigning \
-            signing_temp.keychain | grep -F "$SIGNER"
+          SIGNER=-
+          if [[ "$HAS_CERTIFICATE" == true ]]; then
+            SIGNER=$(openssl x509 -in "$RUNNER_TEMP/rift.crt" \
+              -noout -fingerprint -sha1 |
+              cut -d= -f2 | tr -d ':')
+            security find-identity -v -p codesigning \
+              signing_temp.keychain | grep -F "$SIGNER"
+          fi
 
           # Separate copies need separate seals; sign independent outputs concurrently.
           codesign --force --timestamp=none \
