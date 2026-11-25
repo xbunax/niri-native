@@ -16,6 +16,7 @@ permissions:
 
 jobs:
   dispatch:
+    if: github.repository == 'acsandmann/rift'
     runs-on: ubuntu-latest
     steps:
       - name: Trigger latest documentation build

@@ -60,7 +60,11 @@ fn find_rift_executable() -> io::Result<PathBuf> {
 
 fn sibling_daemon(exe_path: &Path) -> io::Result<PathBuf> {
     // Do not resolve a same-named upstream Rift from PATH or Homebrew.
-    let sibling = exe_path.with_file_name("rift");
+    let name = match exe_path.file_name().and_then(|n| n.to_str()) {
+        Some("niri-native" | "niri-native-cli") => "niri-native",
+        _ => "rift",
+    };
+    let sibling = exe_path.with_file_name(name);
     if sibling.is_file() {
         return Ok(sibling);
     }

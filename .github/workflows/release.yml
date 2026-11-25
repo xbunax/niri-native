@@ -78,15 +78,15 @@ jobs:
       - name: Build release
         run: |
           set -euxo pipefail
-          cargo build --release --locked --package rift-wm \
-            --bin rift --bin rift-cli --target "${{ matrix.target }}"
+          cargo build --release --locked --package niri-native \
+            --bins --target "${{ matrix.target }}"
 
       - name: Bundle architecture binaries
         run: |
           set -euxo pipefail
           mkdir -p artifacts
           tar -C "target/${{ matrix.target }}/release" \
-            -czf "artifacts/${{ matrix.target }}.tar.gz" rift rift-cli
+            -czf "artifacts/${{ matrix.target }}.tar.gz" niri-native niri-native-cli rift rift-cli
 
       - name: Upload architecture binaries
         uses: actions/upload-artifact@v4
@@ -133,6 +133,10 @@ jobs:
             slices/aarch64-apple-darwin/rift-cli \
             slices/x86_64-apple-darwin/rift-cli \
             -output dist/rift-cli
+          for bin in niri-native niri-native-cli; do
+            lipo -create "slices/aarch64-apple-darwin/$bin" "slices/x86_64-apple-darwin/$bin" -output "dist/$bin"
+            strip -x "dist/$bin"
+          done
           strip -x dist/rift dist/rift-cli
           chmod +x dist/rift dist/rift-cli
           for bin in dist/rift dist/rift-cli; do
@@ -146,7 +150,7 @@ jobs:
           set -euo pipefail
           mkdir -p dist/Rift.app/Contents/MacOS
           cp dist/rift dist/Rift.app/Contents/MacOS/rift
-          sed "s/@VERSION@/${RELEASE_TAG#v}/g" assets/Info.plist > dist/Rift.app/Contents/Info.plist
+          sed -e "s/@VERSION@/${RELEASE_TAG#v}/g" -e 's/@EXECUTABLE@/rift/g' assets/Info.plist > dist/Rift.app/Contents/Info.plist
           plutil -lint dist/Rift.app/Contents/Info.plist
           # Both slices must embed the exact same metadata as the enclosing bundle.
           for arch in arm64 x86_64; do
@@ -205,6 +209,10 @@ jobs:
           wait "$legacy_pid"
           wait "$app_pid"
           wait "$cli_pid"
+          for bin in niri-native niri-native-cli; do
+            codesign --force --timestamp=none --sign "$SIGNER" --identifier "git.xbunax.$bin" "dist/$bin"
+            codesign --verify --strict "dist/$bin"
+          done
           codesign --verify --strict --verbose=2 dist/rift
           codesign --verify --strict --verbose=2 dist/Rift.app
           codesign --verify --strict --verbose=2 dist/rift-cli
@@ -220,7 +228,7 @@ jobs:
           test -s rift.default.toml
           cp rift.default.toml dist/rift.default.toml
           # Keep the old archive contract for Nix and other binary consumers.
-          tar -C dist -czf "$LEGACY_ASSET" rift rift-cli rift.default.toml &
+          tar -C dist -czf "$LEGACY_ASSET" niri-native niri-native-cli rift rift-cli rift.default.toml &
           legacy_pid=$!
           tar -C dist -czf "$ASSET" Rift.app rift-cli rift.default.toml &
           app_pid=$!
@@ -239,6 +247,8 @@ jobs:
           VERSION: ${{ steps.pkg.outputs.version }}
         run: |
           set -euo pipefail
+          test "$(dist/niri-native --version)" = "niri-native ${VERSION}"
+          test "$(dist/niri-native-cli --version)" = "niri-native-cli ${VERSION}"
           test "$(dist/rift --version)" = "rift ${VERSION}"
           test "$(dist/Rift.app/Contents/MacOS/rift --version)" = "rift ${VERSION}"
           test "$(dist/rift-cli --version)" = "rift-cli ${VERSION}"
@@ -254,6 +264,7 @@ jobs:
           gh release upload "$RELEASE_TAG" "$ASSET" "$LEGACY_ASSET" --clobber --repo "$RELEASE_REPOSITORY"
 
       - name: Checkout Homebrew tap
+        if: github.repository == 'acsandmann/rift'
         uses: actions/checkout@v4
         with:
           repository: ${{ env.TAP_REPO }}
@@ -261,6 +272,7 @@ jobs:
           token: ${{ secrets.HOMEBREW_TAP_TOKEN }}
 
       - name: Update formula URL, checksum and revision
+        if: github.repository == 'acsandmann/rift'
         env:
           VERSION: ${{ steps.pkg.outputs.version }}
           SHA256: ${{ steps.pkg.outputs.sha256 }}
@@ -310,6 +322,7 @@ jobs:
           ruby -c "$FORMULA"
 
       - name: Commit and push Homebrew formula update
+        if: github.repository == 'acsandmann/rift'
         run: |
           set -euxo pipefail
           git -C tap config user.name "github-actions[bot]"
@@ -323,7 +336,7 @@ jobs:
           git -C tap push origin HEAD
 
       - name: Trigger documentation build
-        if: github.event_name == 'release' || inputs.trigger_docs
+        if: github.repository == 'acsandmann/rift' && (github.event_name == 'release' || inputs.trigger_docs)
         uses: peter-evans/repository-dispatch@v3
         with:
           token: ${{ secrets.HOMEBREW_TAP_TOKEN }}

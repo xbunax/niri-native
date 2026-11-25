@@ -16,8 +16,8 @@ use serde_json::Value;
 
 #[derive(Parser)]
 #[command(version = env!("RIFT_VERSION"))]
-#[command(name = "rift-cli")]
-#[command(about = "Command-line interface for rift window manager")]
+#[command(name = env!("CARGO_BIN_NAME"))]
+#[command(about = "Command-line interface for the niri-native window manager")]
 struct Cli {
     #[command(subcommand)]
     command: Commands,

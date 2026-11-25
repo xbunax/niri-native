@@ -1,5 +1,8 @@
 [package]
-name = "rift-wm"
+name = "niri-native"
+default-run = "niri-native"
+description = "A macOS tiling window manager with native Spaces and niri-style scrolling"
+repository = "https://github.com/xbunax/niri-native"
 version = "0.8.6"
 edition = "2024"
 build = "build.rs"
@@ -8,6 +11,14 @@ build = "build.rs"
 members = [".", "crates/rift-client", "crates/rift-protocol", "crates/rift-config-derive"]
 resolver = "3"
 exclude = ["cgs"]
+
+[[bin]]
+name = "niri-native"
+test = false
+
+[[bin]]
+name = "niri-native-cli"
+test = false # Shares the tested rift-cli implementation.
 
 [[bin]]
 name = "rift"
@@ -54,6 +65,7 @@ inherits = "release"
 strip = false
 
 [lib]
+name = "rift_wm"
 doctest = false
 
 [features]

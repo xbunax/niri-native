@@ -1,100 +1,47 @@
-<div align="center">
+# niri-native
 
-# rift
-  <p>rift is a tiling window manager for macOS that focuses on performance and usability. </p>
-  <img src="assets/demo.gif" alt="Rift demo" />
+**本项目 fork 自 [Rift（acsandmann/rift）](https://github.com/acsandmann/rift)，克隆地址为 `https://github.com/xbunax/niri-native.git`。** niri-native 是 macOS 平铺窗口管理器：保留 Rift 的布局、快捷键和 Overview，把每个工作区直接映射到一个原生 macOS 桌面。名字里的 niri 指滚动列式布局的交互风格；本项目不是 Linux [niri](https://github.com/YaLTeR/niri) 合成器的移植。
 
-  <p>
-    <a href="https://github.com/acsandmann/rift/actions/workflows/rust.yml">
-      <img src="https://img.shields.io/github/actions/workflow/status/acsandmann/rift/rust.yml?style=flat-square" alt="Rust CI Status" />
-    </a>
-    <a href="https://github.com/acsandmann/rift/commits/main">
-      <img src="https://img.shields.io/github/last-commit/acsandmann/rift?style=flat-square" alt="Last Commit" />
-    </a>
-    <a href="https://github.com/acsandmann/rift/issues">
-      <img src="https://img.shields.io/github/issues/acsandmann/rift?style=flat-square" alt="Open Issues" />
-    </a>
-    <a href="https://github.com/acsandmann/rift/stargazers">
-      <img src="https://img.shields.io/github/stars/acsandmann/rift?style=flat-square" alt="GitHub stars" />
-    </a>
-    <a href="https://matrix.to/#/%23rift:matrix.org">
-      <img src="https://img.shields.io/matrix/rift%3Amatrix.org?style=flat-square" alt="Matrix" />
-    </a>
-  </p>
-</div>
+![Rift 窗口布局演示](assets/demo.gif)
 
-## Native Spaces fork
+## 构建与启动
 
-This branch replaces virtual desktops with ordinary macOS Spaces. It keeps the Rift command and configuration syntax, including the `[virtual_workspaces]` table, and uses the existing layouts (including niri-style scrolling). Normal desktops appear in both Rift's overview and macOS Mission Control. Fullscreen Spaces are not workspace targets.
+需要 macOS、Rust 工具链和 Xcode Command Line Tools。使用 SkyLight 私有接口，不需要关闭 SIP；不同 macOS 版本的接口可能变化。首次启动请按系统提示授予辅助功能权限；Overview 的窗口预览还可能需要屏幕录制权限。
 
 ```sh
-cargo build --release --bins
+git clone https://github.com/xbunax/niri-native.git
+cd niri-native
+cargo build --release --locked --bins
 mkdir -p ~/.config/rift-native
 cp -n rift.default.toml ~/.config/rift-native/config.toml
-./target/release/rift
+./target/release/niri-native
 ```
 
-Use the `rift-cli` built alongside that binary. Configuration and layout presets are under `~/.config/rift-native/`, the saved layout is `~/.rift-native/layout.ron`, and IPC and launchd use `git.xbunax.rift-native`. Keep these binaries together in a separate directory from upstream Rift. **Stop the original window manager before starting this fork**: separate configuration does not isolate frame writes or hotkeys in the same GUI session. The upstream install links below are not native-fork installation instructions.
+启动前先退出已运行的 Rift 或 niri-native，避免两个窗口管理器同时接管快捷键和窗口位置。将 `niri-native` 和 `niri-native-cli` 放在同一目录，便于 CLI 管理服务。
 
-Select `mode = "scrolling"` under `[settings.layout]` to use scrolling for every desktop, or continue using workspace layout rules. Use existing workspace shortcuts or macOS Mission Control to switch, and `create_workspace` to add a desktop. Rift neither provisions the legacy configured workspace count nor removes desktops on startup. macOS owns desktop order, display placement and Space-switch animation; global `workspace_rules.display` pins cannot move a native desktop. The cross-display workspace command moves its windows to the desktop at the same ordinal, rather than moving the macOS desktop itself. Private operations require the SkyLight bridged APIs described in [native-spaces](native-spaces/README.md); there is no simulated fallback for workspace mutations.
-
-Numbered workspace switches address the destination Space directly: Rift sets the current Space on its display, confirms the ID, then hides that display’s outgoing Space through the SkyLight bridge. No simulated swipe or Mission Control interaction is required.
-
-### Native workspace CLI
+## 原生工作区
 
 ```sh
-./target/release/rift-cli query workspaces
-./target/release/rift-cli execute workspace list  # same JSON as query workspaces
-./target/release/rift-cli execute workspace create
-./target/release/rift-cli execute workspace destroy 2
+./target/release/niri-native-cli query workspaces
+./target/release/niri-native-cli execute workspace create
+./target/release/niri-native-cli execute workspace switch 1   # 第二个桌面
+./target/release/niri-native-cli execute workspace destroy 2  # 删除第三个桌面
 ```
 
-`list` and `query workspaces` accept `--display <UUID>` and `--space-id <ID>`. Use the zero-based `index` field for `destroy`, not `space_id`. Only an inactive ordinary desktop can be removed. macOS may relocate windows from the removed desktop. Create and destroy return the native `space_id` after the change shows up in the desktop inventory.
+- `index` 从 0 开始，是切换和删除命令接收的参数；`space_id` 是 macOS 自己的标识，不是序号。
+- 切换时先在目标显示器上确认当前 Space，再隐藏原 Space 的窗口。不需要模拟滑动或打开 Mission Control。全屏 Space 不是普通工作区目标。
+- 只能删除非活动桌面；macOS 可能将其中的窗口迁移到其他桌面。启动时不会根据 `default_workspace_count` 自动创建或删除桌面。
+- Overview 按原生窗口归属展示已跟踪的窗口。可在 `[settings.layout]` 中设置 `mode = "scrolling"` 使用滚动列式布局，也可继续使用其他 Rift 布局与应用规则。
 
-## features
-- multiple layout styles
-  - tiling (i3/sway-like)
-  - binary space partitioning (bspwm-like)
-  - floating (independent window frames with optional stacks)
-  - master-stack (dwm-like)
-  - scrolling columns (niri-style)
-  - stack (accordion)
-- menubar icon that opens a menu for switching workspaces, changing layouts, and accessing quick rift controls <details> <summary><sup>click to see the menu bar icon</sup></summary><img src="assets/menu_menu.png" alt="Rift menu bar icon" /></details>
-- save and restore layouts from the menu bar or CLI, with reusable layouts listed from a configurable folder <details> <summary><sup>click to see the menu</sup></summary><img src="assets/menu_layouts.png" alt="Rift menu for restoring layouts" /></details>
-- niri-style mission control for viewing workspaces and dragging windows between them
- <!--<details><summary><sup>click to see mission control</sup></summary><img src="assets/mission_control.png" alt="Rift Mission Control view" /></details> -->
-- focus follows the mouse with auto raise
-<!-- - drag windows over one another to swap positions -->
-- does **not** require disabling SIP
-- native macOS tab support
-- performant animations <sup>(as seen in the [demo](#rift))</sup>
-- switch to next/previous workspace with trackpad gestures <sup>(just like native macOS)</sup>
-- hot reloadable configuration
-- mach port based IPC for communicating with rift from <a href="https://acsandmann.github.io/rift-docs/ecosystem/plugins/">third-party programs</a> (sketchybar, etc)
-- works with "Displays have separate Spaces" enabled (unlike all other major WMs)
+## 从 rift-native 升级
 
-## quick start
-Get up and running via the docs:
-<br>
+**不需要搬配置。** `rift` 和 `rift-cli` 仍随源码构建，与新命令使用同一份实现，不是另一个服务。为兼容现有快捷键、LaunchAgent 和 SketchyBar 脚本，以下名称保持不变：
 
-[<kbd><br>config<br></kbd>][config_link]
+| 项目 | 继续使用 |
+| --- | --- |
+| 用户配置 | `~/.config/rift-native/config.toml` |
+| 保存的布局 | `~/.rift-native/layout.ron` |
+| Mach IPC / launchd 服务 | `git.xbunax.rift-native` |
+| 配置表 | `[virtual_workspaces]` |
 
-[<kbd><br>quick start<br></kbd>][quick_start]
-<br>
-
-## community
-
-Join [#rift:matrix.org](https://matrix.to/#/#rift:matrix.org) for discussion, support, and development.
-
-## support
-
-If rift is part of your daily workflow, consider [sponsoring its development](https://github.com/sponsors/acsandmann).
-
-## motivation
-Aerospace worked well for me, but I missed animations and the ability to use fullscreen on one display while working on the other. I also prefer leveraging private/undocumented APIs as they tend to be more reliable (due to the OS being built on them and all the public APIs) and performant.
-<sup><sup>for more on why rift exists and what rift strives to do, see the [manifesto](manifesto.md)</sup></sup>
-
-<!---------------------------------------------------------------------------->
-
-[config_link]: https://acsandmann.github.io/rift-docs/reference/configuration/
-[quick_start]: https://acsandmann.github.io/rift-docs/quick-start/
+上游 Rift 的 `~/.config/rift/` 不会被覆盖。[默认配置](rift.default.toml)列出了可用设置；[原生 Spaces 接口说明](native-spaces/README.md)介绍了底层操作。感谢 [Rift 的作者及贡献者](https://github.com/acsandmann/rift/graphs/contributors)，许可见 [LICENSE](LICENSE)。

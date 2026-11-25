@@ -73,11 +73,14 @@ fn main() {
     let plist = std::fs::read_to_string("assets/Info.plist")
         .unwrap()
         .replace("@VERSION@", &version);
-    std::fs::write(
-        std::path::Path::new(&std::env::var_os("OUT_DIR").unwrap()).join("Info.plist"),
-        plist,
-    )
-    .unwrap();
+    let out = std::path::PathBuf::from(std::env::var_os("OUT_DIR").unwrap());
+    for exe in ["rift", "niri-native"] {
+        std::fs::write(
+            out.join(format!("{exe}.plist")),
+            plist.replace("@EXECUTABLE@", exe),
+        )
+        .unwrap();
+    }
 
     let release_tag = format!("v{version}");
     let tagged = git(&["tag", "--points-at", "HEAD"])

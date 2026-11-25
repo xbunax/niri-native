@@ -5,7 +5,7 @@
 	<key>CFBundleDevelopmentRegion</key>
 	<string>en</string>
 	<key>CFBundleExecutable</key>
-	<string>rift</string>
+	<string>@EXECUTABLE@</string>
 	<key>CFBundleIdentifier</key>
 	<string>git.xbunax.rift-native</string>
 	<key>CFBundleInfoDictionaryVersion</key>
@@ -17,12 +17,12 @@
 	<key>LSUIElement</key>
 	<true/>
 	<key>CFBundleName</key>
-	<string>rift</string>
+	<string>niri-native</string>
 	<key>CFBundlePackageType</key>
 	<string>APPL</string>
 	<key>NSHumanReadableCopyright</key>
 	<string>Copyright © 2025 acsandmann. All rights reserved.</string>
     <key>NSScreenCaptureUsageDescription</key>
-    <string>Rift optionally captures window previews while Overview is open.</string>
+    <string>niri-native optionally captures window previews while Overview is open.</string>
 </dict>
 </plist>
