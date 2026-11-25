@@ -30,6 +30,8 @@ pub(super) struct NativeWorkspaces {
 
 #[derive(Debug)]
 struct Switch {
+    // The destination display's old Space, not necessarily the command's start Space.
+    hide_after_activation: Option<SpaceId>,
     start: SpaceId,
     target: SpaceId,
     focus: Option<WindowId>,
@@ -324,29 +326,37 @@ impl Reactor {
         else {
             return false;
         };
-        if !self.is_space_active(target)
-            && self
-                .native_workspaces
-                .switches
-                .get(&display)
-                .is_none_or(|request| request.target != target)
-            && !native_spaces::focus(&display, target)
-        {
-            warn!(?target, "SkyLight rejected desktop activation");
+        let Some(current) = crate::sys::screen::current_space_for_display_uuid(&display) else {
             return false;
-        }
+        };
+        let hide_after_activation =
+            if let Some(existing) = self.native_workspaces.switches.get(&display) {
+                if existing.target != target {
+                    return false;
+                }
+                existing.hide_after_activation
+            } else if current != target {
+                if !native_spaces::focus(&display, target) {
+                    warn!(?target, "SkyLight rejected desktop activation");
+                    return false;
+                }
+                Some(current)
+            } else {
+                None
+            };
         self.store_current_floating_positions(start);
         self.retire_viewport_session();
         self.workspace_switch_manager
             .start_workspace_switch(target, WorkspaceSwitchOrigin::Manual);
         let pending = Switch {
+            hide_after_activation,
             start,
             target,
             focus,
             overview,
             deadline: Instant::now() + CONFIRMATION_TIMEOUT,
         };
-        if self.is_space_active(target) {
+        if hide_after_activation.is_none() && self.is_space_active(target) {
             self.native_workspaces.switches.remove(&display);
             self.finish_native_switch(changes, pending);
         } else {
@@ -528,8 +538,18 @@ impl Reactor {
     pub(super) fn advance_native_workspaces(&mut self, changes: &mut Changes, tick: bool) {
         let now = Instant::now();
         let switches = std::mem::take(&mut self.native_workspaces.switches);
-        for (display, request) in switches {
-            if !self.refreshes_blocked() && self.is_space_active(request.target) {
+        for (display, mut request) in switches {
+            // SkyLight can update the current Space before it removes outgoing windows.
+            // Confirm on this display, then submit the hide exactly once before restoring focus.
+            let landed = crate::sys::screen::current_space_for_display_uuid(&display) == Some(request.target);
+            if landed && now < request.deadline && let Some(origin) = request.hide_after_activation.take() {
+                if !native_spaces::hide(origin) {
+                    warn!(?origin, target = ?request.target, "SkyLight rejected outgoing desktop hide");
+                    self.workspace_switch_manager.mark_workspace_switch_inactive();
+                    continue;
+                }
+            }
+            if landed && request.hide_after_activation.is_none() && !self.refreshes_blocked() && self.is_space_active(request.target) {
                 self.finish_native_switch(changes, request);
             } else if now >= request.deadline {
                 self.workspace_switch_manager.mark_workspace_switch_inactive();

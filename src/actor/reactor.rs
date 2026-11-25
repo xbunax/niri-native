@@ -5694,7 +5694,9 @@ impl Reactor {
         let Some(screen) = self.space_state.screen_by_space(space) else {
             return false;
         };
-        if !window_server::focus_desktop_window(screen) {
+        // Dock already owns focus after a native transition. Activating Finder here
+        // can bring the old desktop back, particularly when the destination is empty.
+        if !self.native_workspaces_enabled() && !window_server::focus_desktop_window(screen) {
             return false;
         }
 

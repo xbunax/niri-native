@@ -7,6 +7,7 @@ unsafe extern "C" {
     fn rift_native_space_create(display: *const c_char) -> u64;
     fn rift_native_space_destroy(space: u64) -> c_int;
     fn rift_native_space_focus(display: *const c_char, space: u64) -> c_int;
+    fn rift_native_space_hide(space: u64) -> c_int;
     fn rift_native_space_move(ids: *const u32, count: usize, space: u64) -> c_int;
 }
 
@@ -25,6 +26,10 @@ pub(crate) fn focus(display: &str, space: SpaceId) -> bool {
         return false;
     };
     unsafe { rift_native_space_focus(display.as_ptr(), space.get()) != 0 }
+}
+
+pub(crate) fn hide(space: SpaceId) -> bool {
+    unsafe { rift_native_space_hide(space.get()) != 0 }
 }
 
 pub(crate) fn move_windows(ids: &[WindowServerId], space: SpaceId) -> bool {

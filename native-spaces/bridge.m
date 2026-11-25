@@ -14,6 +14,7 @@
 
 @protocol RiftSpaceOperation
 - (instancetype)initWithSpaceID:(uint64_t)space;
+- (instancetype)initWithSpaces:(NSArray *)spaces;
 - (instancetype)initWithDisplayIdentifier:(NSString *)display spaceID:(uint64_t)space;
 - (instancetype)initWithWindows:(NSArray *)windows spaceID:(uint64_t)space;
 - (void)performWithWMBridgeDelegate;
@@ -60,6 +61,8 @@ int rift_native_space_destroy(uint64_t space) {
 int rift_native_space_focus(const char *display, uint64_t space) {
     @autoreleasepool {
         @try {
+            Class hide = operation(@"SLSBridgedHideSpacesOperation", @selector(initWithSpaces:));
+            if (![hide instancesRespondToSelector:@selector(performWithWMBridgeDelegate)]) return 0;
             Class cls = operation(@"SLSBridgedManagedDisplaySetCurrentSpaceOperation", @selector(initWithDisplayIdentifier:spaceID:));
             if (![cls instancesRespondToSelector:@selector(performWithWMBridgeDelegate)]) return 0;
             id<RiftSpaceOperation> op = [(id<RiftSpaceOperation>)[cls alloc] initWithDisplayIdentifier:@(display) spaceID:space];
@@ -68,6 +71,22 @@ int rift_native_space_focus(const char *display, uint64_t space) {
             return 1;
         } @catch (NSException *exception) {
             NSLog(@"Rift native Space focus: %@", exception);
+            return 0;
+        }
+    }
+}
+
+int rift_native_space_hide(uint64_t space) {
+    @autoreleasepool {
+        @try {
+            Class cls = operation(@"SLSBridgedHideSpacesOperation", @selector(initWithSpaces:));
+            if (![cls instancesRespondToSelector:@selector(performWithWMBridgeDelegate)]) return 0;
+            id<RiftSpaceOperation> op = [(id<RiftSpaceOperation>)[cls alloc] initWithSpaces:@[@(space)]];
+            if (!op) return 0;
+            [op performWithWMBridgeDelegate];
+            return 1;
+        } @catch (NSException *exception) {
+            NSLog(@"Rift native Space hide: %@", exception);
             return 0;
         }
     }

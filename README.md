@@ -38,6 +38,8 @@ Use the `rift-cli` built alongside that binary. Configuration and layout presets
 
 Select `mode = "scrolling"` under `[settings.layout]` to use scrolling for every desktop, or continue using workspace layout rules. Use existing workspace shortcuts or macOS Mission Control to switch, and `create_workspace` to add a desktop. Rift neither provisions the legacy configured workspace count nor removes desktops on startup. macOS owns desktop order, display placement and Space-switch animation; global `workspace_rules.display` pins cannot move a native desktop. The cross-display workspace command moves its windows to the desktop at the same ordinal, rather than moving the macOS desktop itself. Private operations require the SkyLight bridged APIs described in [native-spaces](native-spaces/README.md); there is no simulated fallback for workspace mutations.
 
+Numbered workspace switches address the destination Space directly: Rift sets the current Space on its display, confirms the ID, then hides that display’s outgoing Space through the SkyLight bridge. No simulated swipe or Mission Control interaction is required.
+
 ### Native workspace CLI
 
 ```sh
