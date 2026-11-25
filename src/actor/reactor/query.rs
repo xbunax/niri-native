@@ -16,6 +16,7 @@ use crate::model::server::{
 };
 use crate::model::virtual_workspace::VirtualWorkspaceId;
 use crate::sys::screen::{ScreenInfo, SpaceId};
+use crate::sys::window_server::{self, WindowServerId};
 
 fn union_rect(a: Rect, b: Rect) -> Rect {
     let x = a.origin.x.min(b.origin.x);
@@ -490,9 +491,28 @@ impl Reactor {
             let space = self.layout_manager.layout_engine.workspaces()[*workspace_id].space;
             let index = *index;
             let is_active = (!self.native_workspaces_enabled() || self.is_space_active(space))
-                && self.layout_manager.layout_engine.workspaces().active_workspace(space) == Some(*workspace_id);
-            let workspace_windows_ids = self.state.windows.workspace_windows(*workspace_id);
-            let predicted_positions = if is_active {
+                && self.layout_manager.layout_engine.workspaces().active_workspace(space)
+                    == Some(*workspace_id);
+            // Both Overview (opening and refresh) and the workspace IPC consume this snapshot.
+            // The layout assignment can lag a native move. Enumerate each real desktop, not
+            // just on-screen windows, and resolve actual server IDs to Rift's actionable IDs.
+            let native_ids = self.native_workspaces_enabled().then(|| {
+                window_server::try_space_window_list_for_connection(&[space.get()], 0, false)
+            }).flatten();
+            let mut native_frames = HashMap::default();
+            let workspace_windows_ids = if let Some(ids) = native_ids.as_ref() {
+                let ids: Vec<_> = ids.iter().copied().map(WindowServerId::new).collect();
+                if !ids.is_empty() {
+                    for info in window_server::get_windows(&ids) {
+                        native_frames.insert(info.id, info.frame);
+                    }
+                }
+                ids.into_iter().filter_map(|id| self.state.windows.tracked_window_id(id)).collect()
+            } else {
+                // An unavailable SkyLight query is distinct from a known empty desktop.
+                self.state.windows.workspace_windows(*workspace_id)
+            };
+            let predicted_positions = if is_active || native_ids.is_some() {
                 Vec::new()
             } else {
                 self.native_desktop_screen(space)
@@ -541,10 +561,10 @@ impl Reactor {
                         wd.layout_frame = layout_frames.get(&wid).copied();
                         wd.layout_position = logical_positions.get(&wid).copied();
                     }
-                    if !is_active {
-                        if let Some(pred) = predicted_map.get(&wid).copied() {
-                            wd.info.frame = pred;
-                        }
+                    if let Some(frame) = wd.info.sys_id.and_then(|id| native_frames.get(&id)).copied() {
+                        wd.info.frame = frame;
+                    } else if !is_active && let Some(pred) = predicted_map.get(&wid).copied() {
+                        wd.info.frame = pred;
                     }
                     windows.push(wd);
                 }

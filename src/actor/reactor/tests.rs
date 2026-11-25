@@ -12737,6 +12737,26 @@ fn restored_window_can_be_explicitly_moved_into_the_active_workspace() {
 }
 
 #[test]
+fn native_overview_snapshot_follows_server_membership_not_old_layout() {
+    let (mut apps, mut reactor) = test_context();
+    let origin = SpaceId::new(1);
+    let target = SpaceId::new(9);
+    let wid = WindowId::new(1, 1);
+    apps.make_app_and_settle_on_screen(&mut reactor, CGRect::new(CGPoint::ZERO, CGSize::new(1000., 800.)), origin, 1, make_windows(1));
+    let wsid = reactor.test_window_server_id(wid).as_u32();
+    let store = reactor.layout_manager.layout_engine.workspaces_mut();
+    store.native = true;
+    store.sync_native_catalog(&[vec![origin, target]]);
+    window_server::set_space_window_list_for_space_override(origin.get(), Some(vec![]));
+    window_server::set_space_window_list_for_space_override(target.get(), Some(vec![wsid]));
+    let rows = reactor.query_workspaces(Some(origin));
+    window_server::set_space_window_list_for_space_override(origin.get(), None);
+    window_server::set_space_window_list_for_space_override(target.get(), None);
+    assert!(rows.iter().find(|r| r.space == origin).unwrap().windows.is_empty());
+    assert_eq!(rows.iter().find(|r| r.space == target).unwrap().windows[0].id, wid);
+}
+
+#[test]
 fn overview_activation_arranges_and_focuses_under_cover() {
     for switch_workspace in [false, true] {
         let (mut apps, mut reactor) = test_context();
