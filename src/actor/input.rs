@@ -2017,6 +2017,7 @@ mod tests {
         )
         .unwrap();
         CGEvent::set_location(Some(&event), CGPoint::new(30.0, 40.0));
+        CGEvent::set_flags(Some(&event), CGEventFlags::empty());
         assert!(!input.on_event(CGEventType::ScrollWheel, &event, None));
         let (
             _,
@@ -2287,10 +2288,7 @@ mod tests {
         let overview_settings = initial.settings.ui.mission_control.clone();
         input.on_request(Request::ConfigUpdated(initial), &recovery);
         input.on_request(Request::EnableHotkeys, &recovery);
-        let key = |code| {
-            let event = CGEvent::new_keyboard_event(None, code, true).unwrap();
-            input.on_event(CGEventType::KeyDown, &event, None)
-        };
+        let key = |code| input.on_event(CGEventType::KeyDown, &unmodified_key_down(code), None);
         let global = |event| {
             assert!(matches!(
                 event,
@@ -2502,6 +2500,13 @@ mod tests {
         assert!(events.try_recv().is_err());
     }
 
+    fn unmodified_key_down(code: u16) -> objc2_core_foundation::CFRetained<CGEvent> {
+        let event = CGEvent::new_keyboard_event(None, code, true).unwrap();
+        // A null event source can inherit the current session's modifier flags.
+        CGEvent::set_flags(Some(&event), CGEventFlags::empty());
+        event
+    }
+
     #[test]
     fn active_mode_replacement_unbinds_default_keys_and_mode_switches_are_immediate() {
         let (input, mut wm_rx, _) = input();
@@ -2520,11 +2525,11 @@ mod tests {
         input.hotkeys_active.set(true);
         input.rebuild_binding_maps();
 
-        let b = CGEvent::new_keyboard_event(None, 11, true).unwrap();
+        let b = unmodified_key_down(11);
         assert!(!input.on_event(CGEventType::KeyDown, &b, None));
         assert_eq!(input.active_mode.get(), 1);
 
-        let a = CGEvent::new_keyboard_event(None, 0, true).unwrap();
+        let a = unmodified_key_down(0);
         assert!(input.on_event(CGEventType::KeyDown, &a, None));
         assert!(wm_rx.try_recv().is_err());
 
@@ -2532,7 +2537,7 @@ mod tests {
         assert!(input.on_event(CGEventType::KeyDown, &b, None));
         assert_eq!(input.active_mode.get(), 1);
 
-        let escape = CGEvent::new_keyboard_event(None, 53, true).unwrap();
+        let escape = unmodified_key_down(53);
         assert!(!input.on_event(CGEventType::KeyDown, &escape, None));
         assert_eq!(input.active_mode.get(), 0);
 
@@ -2561,7 +2566,7 @@ mod tests {
             .unwrap()
             .push(WmCommand::Wm(wm_controller::WmCmd::ReloadConfig));
 
-        let a = CGEvent::new_keyboard_event(None, 0, true).unwrap();
+        let a = unmodified_key_down(0);
         assert!(!input.on_event(CGEventType::KeyDown, &a, None));
         assert_eq!(input.active_mode.get(), 1);
         assert!(matches!(
