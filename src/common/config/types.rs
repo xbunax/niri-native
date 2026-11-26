@@ -1,5 +1,5 @@
 use std::collections::BTreeMap;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 use regex::RegexBuilder;
 pub use rift_protocol::{AnimationEasing, ConfigCommand, LayoutMode, WorkspaceSelector};
@@ -23,7 +23,13 @@ pub(super) const DEPRECATED_MAP: &[(&str, &str)] = &[
 pub fn data_dir() -> PathBuf { dirs::home_dir().unwrap().join(".rift-native") }
 pub fn restore_file() -> PathBuf { data_dir().join("layout.ron") }
 pub fn config_file() -> PathBuf {
-    dirs::home_dir().unwrap().join(".config").join("rift-native").join("config.toml")
+    config_file_in(&dirs::home_dir().unwrap())
+}
+
+pub(super) fn config_file_in(home: &Path) -> PathBuf {
+    let preferred = home.join(".config/niri-native/config.toml");
+    let legacy = home.join(".config/rift-native/config.toml");
+    if !preferred.exists() && legacy.is_file() { legacy } else { preferred }
 }
 
 #[derive(Serialize, Deserialize, Debug, PartialEq, Clone, Copy, Default, Eq, ConfigEnum)]
@@ -1877,7 +1883,7 @@ fn default_animation_duration() -> f64 { 0.3 }
 
 fn default_animation_fps() -> f64 { 100.0 }
 
-fn default_layout_folder() -> PathBuf { PathBuf::from("~/.config/rift-native/layouts") }
+fn default_layout_folder() -> PathBuf { PathBuf::from("~/.config/niri-native/layouts") }
 
 fn default_workspace_count() -> usize { 4 }
 

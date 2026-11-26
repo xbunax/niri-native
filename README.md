@@ -4,20 +4,53 @@
 
 ![Rift 窗口布局演示](assets/demo.gif)
 
-## 构建与启动
+## Homebrew 安装
+
+```sh
+brew tap xbunax/tap
+brew install xbunax/tap/niri-native
+niri-native --version
+```
+
+Homebrew 安装的是 GitHub Release 的预编译通用二进制，不会启动服务，也不会覆盖上游 Rift 的命令。若 Homebrew 提示 tap 未受信任，确认来源后可执行 `brew trust --formula xbunax/tap/niri-native` 再安装。
+
+当前 Homebrew 稳定版 `0.8.6` 仍读取 `~/.config/rift-native/config.toml`。如需自定义，运行以下命令（不会覆盖已有文件）：
+
+```sh
+mkdir -p ~/.config/rift-native
+cp -n "$(brew --prefix niri-native)/share/niri-native/rift.default.toml" ~/.config/rift-native/config.toml
+```
+
+默认路径已在新版源码中改为 `~/.config/niri-native/config.toml`；新版找不到该文件时，会继续读取旧配置。两者都不存在时，可直接使用内置默认配置。
+
+## 启动与登录自启
+
+先退出正在运行的 Rift 或 niri-native，避免两个窗口管理器同时接管键盘和窗口。首次启动前，请在「系统设置 → 隐私与安全性 → 辅助功能」中授权 `niri-native`。可先运行 `niri-native` 验证权限，再按 `Ctrl+C` 退出，或直接设置登录自启：
+
+```sh
+niri-native service install   # 写入当前用户的 LaunchAgent；仅首次需要
+niri-native service start     # 启用并启动，以后登录时自动启动
+launchctl print "gui/$(id -u)/git.xbunax.rift-native"  # 查看服务状态
+```
+
+服务已安装时直接执行 `service start`，它也可以在首次启动时自动安装。无需 `sudo`，也不使用 `brew services`。要停止服务用 `niri-native service stop`；若要取消登录自启，在停止后再执行 `niri-native service uninstall`。
+
+## 从源码构建
 
 需要 macOS、Rust 工具链和 Xcode Command Line Tools。使用 SkyLight 私有接口，不需要关闭 SIP；不同 macOS 版本的接口可能变化。首次启动请按系统提示授予辅助功能权限；Overview 的窗口预览还可能需要屏幕录制权限。
+
+若已有旧版配置，可跳过下面的 `mkdir` 和 `cp`，继续使用旧配置，或按下方说明迁移。
 
 ```sh
 git clone https://github.com/xbunax/niri-native.git
 cd niri-native
 cargo build --release --locked --bins
-mkdir -p ~/.config/rift-native
-cp -n rift.default.toml ~/.config/rift-native/config.toml
+mkdir -p ~/.config/niri-native
+cp -n rift.default.toml ~/.config/niri-native/config.toml
 ./target/release/niri-native
 ```
 
-启动前先退出已运行的 Rift 或 niri-native，避免两个窗口管理器同时接管快捷键和窗口位置。将 `niri-native` 和 `niri-native-cli` 放在同一目录，便于 CLI 管理服务。
+源码构建版也可用 `./target/release/niri-native service start` 设置登录自启；请将二进制保留在固定位置，LaunchAgent 会记录它的绝对路径。
 
 ## 原生工作区
 
@@ -35,11 +68,12 @@ cp -n rift.default.toml ~/.config/rift-native/config.toml
 
 ## 从 rift-native 升级
 
-**不需要搬配置。** `rift` 和 `rift-cli` 仍随源码构建，与新命令使用同一份实现，不是另一个服务。为兼容现有快捷键、LaunchAgent 和 SketchyBar 脚本，以下名称保持不变：
+新版优先读取 `~/.config/niri-native/config.toml`，没有时回退到 `~/.config/rift-native/config.toml`。要主动迁移，可执行 `mkdir -p ~/.config/niri-native`，再执行 `cp -n ~/.config/rift-native/config.toml ~/.config/niri-native/config.toml`。旧文件不会被删除，配置中显式指定的布局目录也不会被重写。
+
+`rift` 和 `rift-cli` 仍随源码构建，与新命令使用同一份实现，不是另一个服务。为兼容现有快捷键、LaunchAgent 和 SketchyBar 脚本，以下名称保持不变：
 
 | 项目 | 继续使用 |
 | --- | --- |
-| 用户配置 | `~/.config/rift-native/config.toml` |
 | 保存的布局 | `~/.rift-native/layout.ron` |
 | Mach IPC / launchd 服务 | `git.xbunax.rift-native` |
 | 配置表 | `[virtual_workspaces]` |

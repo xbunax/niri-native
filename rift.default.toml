@@ -1,5 +1,5 @@
 # rift config
-# Copy this file to ~/.config/rift-native/config.toml
+# Copy this file to ~/.config/niri-native/config.toml
 
 [settings]
 # Animations
@@ -230,7 +230,7 @@ display_style = "layout"
 # when display_style = "label", add brackets (e.g. "[2]") when a window is in fullscreen
 show_fullscreen_indicator = false
 # .ron files in this folder appear under Layout Files in the menu bar
-layout_folder = "~/.config/rift-native/layouts"
+layout_folder = "~/.config/niri-native/layouts"
 
 [settings.ui.stack_line]
 # native tabs beside stacked windows (defaults to on)
