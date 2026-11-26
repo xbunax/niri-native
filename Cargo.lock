@@ -817,7 +817,7 @@ dependencies = [
 
 [[package]]
 name = "niri-native"
-version = "0.8.6"
+version = "0.1.0"
 dependencies = [
  "anyhow",
  "ascii_tree",

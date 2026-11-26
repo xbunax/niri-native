@@ -14,14 +14,16 @@ niri-native --version
 
 Homebrew 安装的是 GitHub Release 的预编译通用二进制，不会启动服务，也不会覆盖上游 Rift 的命令。若 Homebrew 提示 tap 未受信任，确认来源后可执行 `brew trust --formula xbunax/tap/niri-native` 再安装。
 
-当前 Homebrew 稳定版 `0.8.6` 仍读取 `~/.config/rift-native/config.toml`。如需自定义，运行以下命令（不会覆盖已有文件）：
+niri-native 从 **0.1.0** 起独立编号；旧的 `0.8.6` 沿用了 Rift 的版本号。已安装旧版可执行 `brew update` 和 `brew upgrade xbunax/tap/niri-native`。如果已在使用旧配置，可以直接启动，不需要复制模板。
+
+新用户如需创建可编辑的配置文件：
 
 ```sh
-mkdir -p ~/.config/rift-native
-cp -n "$(brew --prefix niri-native)/share/niri-native/rift.default.toml" ~/.config/rift-native/config.toml
+mkdir -p ~/.config/niri-native
+cp -n "$(brew --prefix niri-native)/share/niri-native/rift.default.toml" ~/.config/niri-native/config.toml
 ```
 
-默认路径已在新版源码中改为 `~/.config/niri-native/config.toml`；新版找不到该文件时，会继续读取旧配置。两者都不存在时，可直接使用内置默认配置。
+默认读取 `~/.config/niri-native/config.toml`；找不到该文件时，回退到 `~/.config/rift-native/config.toml`。两者都不存在时，使用内置默认配置。
 
 ## 启动与登录自启
 

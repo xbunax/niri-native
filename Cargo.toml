@@ -3,7 +3,7 @@ name = "niri-native"
 default-run = "niri-native"
 description = "A macOS tiling window manager with native Spaces and niri-style scrolling"
 repository = "https://github.com/xbunax/niri-native"
-version = "0.8.6"
+version = "0.1.0"
 edition = "2024"
 build = "build.rs"
 
